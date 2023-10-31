@@ -1,0 +1,31 @@
+* ~eeg-visualizer-0~
+
+A real-time visualizer for EEG data.
+
+Main use case, currently: Receive EEG data via
+[[https://labstreaminglayer.org][LSL]] and visualize for neurofeedback.
+
+This is a toy project and by no means "complete" or "production-ready" in any
+way.
+
+** Dependencies
+
+- [[https://github.com/sccn/liblsl][liblsl]]
+- [[https://www.fftw.org][FFTW]]
+- [[https://www.sfml-dev.org][SFML]]
+
+** Build instructions
+
+#~begin_src sh
+  mkdir -p build; cd build
+  cmake ..
+  make
+#~end_src
+
+Debug build for development:
+#~begin_src sh
+  mkdir -p build; cd build
+  cmake .. -G Ninja -DCMAKE_BUILD_TYPE=Debug
+  cd ..
+  ninja -C build
+#~end_src
