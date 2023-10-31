@@ -16,16 +16,16 @@ way.
 
 ** Build instructions
 
-#~begin_src sh
+#+begin_src sh
   mkdir -p build; cd build
   cmake ..
   make
-#~end_src
+#+end_src
 
 Debug build for development:
-#~begin_src sh
+#+begin_src sh
   mkdir -p build; cd build
   cmake .. -G Ninja -DCMAKE_BUILD_TYPE=Debug
   cd ..
   ninja -C build
-#~end_src
+#+end_src
