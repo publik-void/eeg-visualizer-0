@@ -14,6 +14,9 @@ way.
 - [[https://www.fftw.org][FFTW]]
 - [[https://www.sfml-dev.org][SFML]]
 
+Plus [[https://cmake.org][CMake]] and optionally
+[[https://ninja-build.org][Ninja]] for building.
+
 ** Build instructions
 
 #+begin_src sh
