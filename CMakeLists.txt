@@ -16,6 +16,9 @@ if (${CMAKE_GENERATOR} STREQUAL "Ninja Multi-Config")
   set(CMAKE_DEFAULT_BUILD_TYPE ${CMAKE_BUILD_TYPE})
 endif()
 
+set(CMAKE_THREAD_PREFER_PTHREAD TRUE)
+set(THREADS_PREFER_PTHREAD_FLAG TRUE)
+
 project(eeg-visualizer-0)
 
 if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
@@ -59,4 +62,7 @@ target_link_libraries(client-visual PUBLIC lsl-customized sfml-system
 add_executable(main src/main.cpp)
 target_link_libraries(main PUBLIC signal-handling args dsp server-dummy
   client-visual)
+
+find_package(Threads REQUIRED)
+target_link_libraries(eeg-visualizer-0 Threads::Threads)
 
