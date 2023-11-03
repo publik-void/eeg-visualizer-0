@@ -16,7 +16,7 @@ if (${CMAKE_GENERATOR} STREQUAL "Ninja Multi-Config")
   set(CMAKE_DEFAULT_BUILD_TYPE ${CMAKE_BUILD_TYPE})
 endif()
 
-project(lsl-neurofeedback-0)
+project(eeg-visualizer-0)
 
 if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
   string(APPEND CMAKE_CXX_FLAGS_DEBUG " -O0" " -ggdb3")
@@ -35,23 +35,28 @@ if (${CMAKE_GENERATOR} MATCHES "Ninja")
   endif()
 endif()
 
-add_library(_lsl INTERFACE IMPORTED)
-target_link_libraries(_lsl INTERFACE lsl)
-target_include_directories(_lsl SYSTEM INTERFACE /usr/local/include)
-target_link_directories(_lsl INTERFACE /usr/local/lib)
+add_library(lsl-imported INTERFACE IMPORTED)
+target_link_libraries(lsl-imported INTERFACE lsl)
+target_include_directories(lsl-imported SYSTEM INTERFACE /usr/local/include)
+target_link_directories(lsl-imported INTERFACE /usr/local/lib)
+
+add_library(lsl-customized STATIC src/lsl-customized.cpp)
+target_link_libraries(lsl-customized PUBLIC lsl-imported)
 
 add_library(signal-handling STATIC src/signal-handling.cpp)
 
 add_library(args STATIC src/args.cpp)
 
+add_library(dsp STATIC src/dsp.cpp)
+
 add_library(server-dummy STATIC src/server-dummy.cpp)
-target_link_libraries(server-dummy PUBLIC _lsl)
+target_link_libraries(server-dummy PUBLIC lsl-customized)
 
 add_library(client-visual STATIC src/client-visual.cpp)
-target_link_libraries(client-visual PUBLIC _lsl sfml-system sfml-window
-  sfml-graphics)
+target_link_libraries(client-visual PUBLIC lsl-customized sfml-system
+  sfml-window sfml-graphics fftw3f)
 
 add_executable(main src/main.cpp)
-target_link_libraries(main PUBLIC signal-handling args server-dummy
+target_link_libraries(main PUBLIC signal-handling args dsp server-dummy
   client-visual)
 

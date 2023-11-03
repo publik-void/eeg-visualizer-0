@@ -1,6 +1,5 @@
 #include <cstddef>
 #include <vector>
-#include <string>
 #include <iostream>
 
 #include "signal-handling.hpp"
@@ -8,12 +7,10 @@
 #include "server-dummy.hpp"
 #include "client-visual.hpp"
 
-// Using a const vector instead of an enum struct for more functionality.
-// `constexpr` would be better, but `std::string` does not support it (yet).
-std::vector<std::string> const main_modes{"error", "help", "server-dummy",
+args::modes_t<4> constexpr main_modes{"error", "help", "server-dummy",
   "client-visual"};
 
-int print_usage(std::string const &program_name, std::ostream &out = std::cout,
+int print_usage(args::arg_t const &program_name, std::ostream &out = std::cout,
     int const exit_code = 0) {
   out
     << "Usage:\n"
@@ -32,13 +29,13 @@ int main(int argc, char *argv[]) {
   auto program_name{*(arg_itr++)};
 
   auto const main_mode{
-    args::get_subcommand_index(main_modes, arg_itr, arg_end, 0)};
+    args::get_mode_index(main_modes, arg_itr, arg_end, 0)};
 
-  if (main_mode == args::get_subcommand_index(main_modes, "help"))
+  if (main_mode == args::get_mode_index(main_modes, "help"))
     return print_usage(program_name);
-  else if (main_mode == args::get_subcommand_index(main_modes, "server-dummy"))
+  else if (main_mode == args::get_mode_index(main_modes, "server-dummy"))
     return main_server_dummy(arg_itr, arg_end);
-  else if (main_mode == args::get_subcommand_index(main_modes, "client-visual"))
+  else if (main_mode == args::get_mode_index(main_modes, "client-visual"))
     return main_client_visual(arg_itr, arg_end);
   else // catch-all, includes `main_mode == error`
     return print_usage(program_name, std::cerr, 1);
