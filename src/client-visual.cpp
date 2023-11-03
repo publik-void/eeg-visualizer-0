@@ -1,6 +1,6 @@
 #include <cstddef>
 #include <cmath>
-#include <numbers>
+//#include <numbers>
 #include <complex>
 #include <utility>
 #include <memory>
@@ -345,9 +345,11 @@ int main_client_visual(args::args_t::const_iterator &pos,
   Buffer buffer(lsl::get_attachment(lsl_attachment_var), buffer_duration);
 
   // Set up preprocessing (TODO: Abstract this)
+  //auto const pi{std::numbers::pi};
+  double const pi{static_cast<double>(3.14159265358979323846264338328)};
   auto const [highpass_bs, highpass_as]{
     dsp::biquad_rbj<double, dsp::BiquadShape::highpass>(
-      2 * std::numbers::pi * highpass_frequency / buffer.sample_rate(), 
+      2 * pi * highpass_frequency / buffer.sample_rate(), 
       highpass_quality_factor)};
   dsp::IIRSpec<float, 2, 2> highpass_spec(highpass_bs, highpass_as);
   auto highpass_state{dsp::make_state(highpass_spec, buffer.n_channels())};

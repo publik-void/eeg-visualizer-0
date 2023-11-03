@@ -1,6 +1,6 @@
 #pragma once
 
-#include <numbers>
+//#include <numbers>
 #include <cmath>
 #include <utility>
 #include <array>
@@ -167,8 +167,10 @@ enum struct BiquadShape {
 
 template <typename T, BiquadShape shape>
 inline auto biquad_rbj(
-    T const &omega_0 = std::numbers::pi_v<T> / static_cast<T>(2),
-    T const &q = static_cast<T>(1) / std::numbers::sqrt2_v<T>,
+    //T const &omega_0 = std::numbers::pi_v<T> / static_cast<T>(2),
+    T const &omega_0 = static_cast<T>(3.14159265358979323846264338328) / static_cast<T>(2),
+    //T const &q = static_cast<T>(1) / std::numbers::sqrt2_v<T>,
+    T const &q = static_cast<T>(1) / static_cast<T>(1.41421356237309504880168872421),
     [[maybe_unused]] /*TODO*/ T const &a = static_cast<T>(1)) {
   T const zero{static_cast<T>(0)};
   T const one_half{static_cast<T>(.5)};
@@ -221,12 +223,14 @@ inline T window(std::size_t const i, std::size_t const n, T const parameter_0) {
   if constexpr (shape == WindowShape::identity) {
     return one;
   } else if constexpr (shape == WindowShape::blackman) {
+    //T const pi{std::numbers::pi_v<T>};
+    T const pi{static_cast<T>(3.14159265358979323846264338328)};
     T const alpha{parameter_0};
     T const alpha_2{alpha * one_half};
     T const alpha_0{one_half - alpha_2};
     T const alpha_1{one_half};
     T const two_pi_i_over_n_minus_one{
-      two * std::numbers::pi_v<T> * i / (n - 1)};
+      two * pi * i / (n - 1)};
     return alpha_0 - alpha_1 * std::cos(two_pi_i_over_n_minus_one) +
       alpha_2 * std::cos(two * two_pi_i_over_n_minus_one);
   } else if constexpr (shape == WindowShape::kaiser) {
