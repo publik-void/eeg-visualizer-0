@@ -1,6 +1,5 @@
 #pragma once
 
-//#include <numbers>
 #include <cmath>
 #include <utility>
 #include <array>
@@ -9,6 +8,8 @@
 #include <iterator>
 
 //#include <iostream>
+
+#include "numbers-and-math.hpp"
 
 namespace dsp {
 
@@ -167,10 +168,8 @@ enum struct BiquadShape {
 
 template <typename T, BiquadShape shape>
 inline auto biquad_rbj(
-    //T const &omega_0 = std::numbers::pi_v<T> / static_cast<T>(2),
-    T const &omega_0 = static_cast<T>(3.14159265358979323846264338328) / static_cast<T>(2),
-    //T const &q = static_cast<T>(1) / std::numbers::sqrt2_v<T>,
-    T const &q = static_cast<T>(1) / static_cast<T>(1.41421356237309504880168872421),
+    T const &omega_0 = pi_halves<T>,
+    T const &q = sqrt_one_half<T>,
     [[maybe_unused]] /*TODO*/ T const &a = static_cast<T>(1)) {
   T const zero{static_cast<T>(0)};
   T const one_half{static_cast<T>(.5)};
@@ -216,32 +215,29 @@ enum struct WindowShape {
 
 template<typename T, WindowShape shape>
 inline T window(std::size_t const i, std::size_t const n, T const parameter_0) {
-  T const zero{static_cast<T>(0)};
+  //T const zero{static_cast<T>(0)};
   T const one_half{static_cast<T>(.5)};
   T const one{static_cast<T>(1)};
   T const two{static_cast<T>(2)};
   if constexpr (shape == WindowShape::identity) {
     return one;
   } else if constexpr (shape == WindowShape::blackman) {
-    //T const pi{std::numbers::pi_v<T>};
-    T const pi{static_cast<T>(3.14159265358979323846264338328)};
     T const alpha{parameter_0};
     T const alpha_2{alpha * one_half};
     T const alpha_0{one_half - alpha_2};
     T const alpha_1{one_half};
     T const two_pi_i_over_n_minus_one{
-      two * pi * i / (n - 1)};
+      two * pi<T> * i / (n - 1)};
     return alpha_0 - alpha_1 * std::cos(two_pi_i_over_n_minus_one) +
       alpha_2 * std::cos(two * two_pi_i_over_n_minus_one);
   } else if constexpr (shape == WindowShape::kaiser) {
-    //auto const square{[](T const &x){ return x * x; }};
-    //auto const i0{[](T const &x){
-    //  return std::cyl_bessel_j(zero, x); }};
-    //T const alpha{parameter_0};
-    //T const pi_alpha{std::numbers::pi_v<T> * alpha};
-    //return i0(pi_alpha * std::sqrt(one - square((two * i) / (n - 1) - one))) /
-    //  i0(pi_alpha);
-    // NOTE: `std::cyl_bessel_j` does not exist on AppleClang 14?
+    auto const square{[](T const &x){ return x * x; }};
+    auto const i0{[](T const &x){
+      return bessel_i0(x); }};
+    T const alpha{parameter_0};
+    T const pi_alpha{pi<T> * alpha};
+    return i0(pi_alpha * std::sqrt(one - square((two * i) / (n - 1) - one))) /
+      i0(pi_alpha);
   }
 }
 

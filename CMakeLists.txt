@@ -38,6 +38,8 @@ if (${CMAKE_GENERATOR} MATCHES "Ninja")
   endif()
 endif()
 
+find_package(Threads REQUIRED)
+
 add_library(lsl-imported INTERFACE IMPORTED)
 target_link_libraries(lsl-imported INTERFACE lsl)
 target_include_directories(lsl-imported SYSTEM INTERFACE /usr/local/include)
@@ -61,8 +63,5 @@ target_link_libraries(client-visual PUBLIC lsl-customized sfml-system
 
 add_executable(main src/main.cpp)
 target_link_libraries(main PUBLIC signal-handling args dsp server-dummy
-  client-visual)
-
-find_package(Threads REQUIRED)
-target_link_libraries(eeg-visualizer-0 Threads::Threads)
+  client-visual Threads::Threads)
 
