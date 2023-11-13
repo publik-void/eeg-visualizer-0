@@ -38,12 +38,14 @@ if (${CMAKE_GENERATOR} MATCHES "Ninja")
   endif()
 endif()
 
+find_package(PkgConfig REQUIRED)
 find_package(Threads REQUIRED)
+find_package(LSL REQUIRED)
+find_package(SFML  COMPONENTS window graphics REQUIRED)
+pkg_search_module(FFTW REQUIRED fftw3f IMPORTED_TARGET)
 
 add_library(lsl-imported INTERFACE IMPORTED)
-target_link_libraries(lsl-imported INTERFACE lsl)
-target_include_directories(lsl-imported SYSTEM INTERFACE /usr/local/include)
-target_link_directories(lsl-imported INTERFACE /usr/local/lib)
+target_link_libraries(lsl-imported INTERFACE LSL::lsl)
 
 add_library(lsl-customized STATIC src/lsl-customized.cpp)
 target_link_libraries(lsl-customized PUBLIC lsl-imported)
@@ -52,14 +54,14 @@ add_library(signal-handling STATIC src/signal-handling.cpp)
 
 add_library(args STATIC src/args.cpp)
 
-add_library(dsp STATIC src/dsp.cpp)
+add_library(dsp INTERFACE src/dsp.hpp)
 
 add_library(server-dummy STATIC src/server-dummy.cpp)
 target_link_libraries(server-dummy PUBLIC lsl-customized)
 
 add_library(client-visualizer STATIC src/client-visualizer.cpp)
-target_link_libraries(client-visualizer PUBLIC lsl-customized sfml-system
-  sfml-window sfml-graphics fftw3f)
+target_link_libraries(client-visualizer PUBLIC lsl-customized sfml-window
+  sfml-graphics PkgConfig::FFTW)
 
 add_executable(eeg-visualizer src/main.cpp)
 target_link_libraries(eeg-visualizer PUBLIC signal-handling args dsp
