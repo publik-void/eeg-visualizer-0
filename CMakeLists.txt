@@ -57,11 +57,11 @@ add_library(dsp STATIC src/dsp.cpp)
 add_library(server-dummy STATIC src/server-dummy.cpp)
 target_link_libraries(server-dummy PUBLIC lsl-customized)
 
-add_library(client-visual STATIC src/client-visual.cpp)
-target_link_libraries(client-visual PUBLIC lsl-customized sfml-system
+add_library(client-visualizer STATIC src/client-visualizer.cpp)
+target_link_libraries(client-visualizer PUBLIC lsl-customized sfml-system
   sfml-window sfml-graphics fftw3f)
 
-add_executable(main src/main.cpp)
-target_link_libraries(main PUBLIC signal-handling args dsp server-dummy
-  client-visual Threads::Threads)
+add_executable(eeg-visualizer src/main.cpp)
+target_link_libraries(eeg-visualizer PUBLIC signal-handling args dsp
+  server-dummy client-visualizer Threads::Threads)
 

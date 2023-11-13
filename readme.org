@@ -32,3 +32,18 @@ Debug build for development:
   cd ..
   ninja -C build
 #+end_src
+
+** Silencing LSL info messages
+
+By default, the LSL library prints info messages e.g. when connecting to the
+network. This can be configured via a configuration file, which can be created
+as follows:
+
+#+begin_src sh
+mkdir -p $HOME/lsl_api && printf "[log]\nlevel = -2" > $HOME/lsl_api/lsl_api.cfg
+#+end_src
+
+Caution: If a configuration file already exists at ~$HOME/lsl_api~, it will be
+overwritten by the above command. There are multiple possible locations for LSL
+configuration files. It is recommended to use the same configuration on all
+   servers and clients on a network. Also see the [[https://labstreaminglayer.readthedocs.io/info/lslapicfg.html?highlight=log#configuration-file-locations][LSL documentation]].

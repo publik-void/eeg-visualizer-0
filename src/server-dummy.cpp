@@ -11,7 +11,7 @@
 #include "lsl-customized.hpp"
 
 int main_server_dummy(args::args_t::const_iterator &pos,
-    args::args_t::const_iterator const &end) {
+    args::args_t::const_iterator const &end, args::arg_t const &program_name) {
   args::flags_t flags{{"print-data", false}};
   args::opts_t opts{{"sample-rate", {}}};
   args::parse_opts_and_flags(flags, opts, pos, end);
@@ -20,7 +20,7 @@ int main_server_dummy(args::args_t::const_iterator &pos,
     source_id{"lsl-server-dummy-id"};
   lsl::channel_format_t channel_format = lsl::cf_float32;
   double sample_rate{
-    args::parse_opt(args::parse_double, opts["sample-rate"], 100.)};
+    args::parse_opt(args::parse_double, opts["sample-rate"], 1000.)};
   std::int32_t const n_channels = 8;
 
   lsl::stream_info info{name, type, n_channels, sample_rate, channel_format,
