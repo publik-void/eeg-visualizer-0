@@ -59,9 +59,12 @@ add_library(dsp INTERFACE src/dsp.hpp)
 add_library(server-dummy STATIC src/server-dummy.cpp)
 target_link_libraries(server-dummy PUBLIC lsl-customized)
 
+add_library(plotting STATIC src/plotting.cpp)
+target_link_libraries(plotting PUBLIC sfml-graphics)
+
 add_library(client-visualizer STATIC src/client-visualizer.cpp)
-target_link_libraries(client-visualizer PUBLIC lsl-customized sfml-window
-  sfml-graphics PkgConfig::FFTW)
+target_link_libraries(client-visualizer PUBLIC lsl-customized plotting
+  sfml-window sfml-graphics PkgConfig::FFTW)
 
 add_executable(eeg-visualizer src/main.cpp)
 target_link_libraries(eeg-visualizer PUBLIC signal-handling args dsp

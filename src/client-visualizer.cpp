@@ -22,9 +22,10 @@
 
 #include "signal-handling.hpp"
 #include "args.hpp"
-#include "dsp.hpp"
-#include "lsl-customized.hpp"
 #include "numbers-and-math.hpp"
+#include "dsp.hpp"
+#include "plotting.hpp"
+#include "lsl-customized.hpp"
 
 args::desc_t constexpr desc_visualizer{
   "Visualize incoming EEG data in real time."};
@@ -158,149 +159,6 @@ inline bool past_newest_sample(Buffer &buffer,
   return past_newest_sample(buffer, sample.first);
 }
 
-struct GraphBase {
-  sf::VertexArray vertexes;
-  std::size_t n() const { return this->vertexes.getVertexCount(); }
-
-  sf::Vertex * begin() {
-    return &(this->vertexes[0]);
-  }
-  sf::Vertex * end() {
-    return &(this->vertexes[vertexes.getVertexCount() - 1]) + 1;
-  }
-
-  using state_t = sf::Vertex *;
-
-  GraphBase(sf::VertexArray const vertexes) : vertexes{vertexes} {}
-  GraphBase(sf::PrimitiveType const primitive, std::size_t const n_vertexes,
-      sf::Color const &init_color) : vertexes{[&](){
-        sf::VertexArray vertexes(primitive, n_vertexes);
-        for (std::size_t i{0}; i < vertexes.getVertexCount(); ++i)
-          vertexes[i].color = init_color;
-        return vertexes;
-      }()} {}
-  virtual ~GraphBase() {}
-};
-
-inline GraphBase::state_t iterative_set_init(GraphBase &self) {
-  return self.begin();
-}
-
-inline GraphBase::state_t iterative_set_point(GraphBase &, sf::Vector2f const p,
-    GraphBase::state_t const &s) {
-  s->position = p;
-  return s + 1;
-}
-
-inline GraphBase::state_t iterative_set_point(GraphBase &self,
-    sf::Vector2f const p, sf::Color const c, GraphBase::state_t const &s) {
-  s->color = c;
-  return iterative_set_point(self, p, s);
-}
-
-void draw(sf::RenderTarget &target, GraphBase const &graph) {
-  target.draw(graph.vertexes);
-}
-
-sf::Vector2f thickness_px_to_2d(float const thickness,
-    auto/*sf::Window or sf::RenderTarget*/ const &target) {
-  auto size{target.getSize()};
-  return {thickness / size.x, thickness / size.y};
-}
-
-args::modes_t<1> constexpr modes_graph{"curve"};
-
-template<std::size_t mode>
-struct Graph : public GraphBase {};
-
-template<>
-struct Graph<args::get_mode_index(modes_graph, "curve")> : public GraphBase {
-  sf::Vector2f thickness_2d;
-
-  std::size_t n() const {
-    return this->vertexes.getVertexCount() / 4 + 1;
-  }
-
-  struct state_t {
-    sf::Vertex * segment;
-    sf::Vector2f p;
-    sf::Color c;
-  };
-
-  Graph(std::size_t const n, sf::Color const &init_color,
-      sf::Vector2f const thickness_2d) :
-      GraphBase(sf::PrimitiveType::TriangleStrip, (n - 1) * 4, init_color),
-      thickness_2d{thickness_2d} {}
-};
-
-using Curve = Graph<args::get_mode_index(modes_graph, "curve")>;
-
-inline sf::Vertex * get_segment(Curve &self, std::size_t const i = 0) {
-  return &(self.vertexes[i * 4]);
-}
-
-inline sf::Vertex * prev_segment(Curve &, sf::Vertex * const segment) {
-  return segment - 4;
-}
-
-inline sf::Vertex * next_segment(Curve &, sf::Vertex * const segment) {
-  return segment + 4;
-}
-
-inline sf::Vertex * set_segment(Curve &self, sf::Vertex * segment,
-    sf::Vector2f const p0, sf::Vector2f const p1) {
-  sf::Vector2f const nv{p0.y - p1.y, p1.x - p0.x};
-  //sf::Vector2f const nv{p1.y - p0.y, p0.x - p1.x};
-  float const length{std::sqrt((nv.x * nv.x) + (nv.y * nv.y))};
-  sf::Vector2f const snv{nv.x * self.thickness_2d.x / length,
-                         nv.y * self.thickness_2d.y / length};
-
-  (segment++)->position = p0 + snv;
-  (segment++)->position = p0 - snv;
-  (segment++)->position = p1 + snv;
-  (segment++)->position = p1 - snv;
-  return segment;
-}
-
-inline sf::Vertex * set_segment(Curve &self, std::size_t const i,
-    sf::Vector2f const p0, sf::Vector2f const p1) {
-  return set_segment(self, get_segment(self, i), p0, p1);
-}
-
-inline sf::Vertex * set_segment(Curve &, sf::Vertex * segment,
-    sf::Color const c0, sf::Color const c1) {
-  (segment++)->color = c0;
-  (segment++)->color = c0;
-  (segment++)->color = c1;
-  (segment++)->color = c1;
-  return segment;
-}
-
-inline sf::Vertex * set_segment(Curve &self, std::size_t const i,
-    sf::Color const c0, sf::Color const c1) {
-  return set_segment(self, get_segment(self, i), c0, c1);
-}
-
-inline Curve::state_t iterative_set_init(Curve &self,
-    std::optional<sf::Color> const c_init = {}) {
-  return {prev_segment(self, get_segment(self)), {},
-    c_init.value_or(get_segment(self)->color)};
-}
-
-inline Curve::state_t iterative_set_point(Curve &self, sf::Vector2f const p,
-    Curve::state_t const &s) {
-  sf::Vertex * const next{s.segment >= get_segment(self)
-    ? set_segment(self, s.segment, s.p, p)
-    : next_segment(self, s.segment)};
-  return {next, p, s.c};
-}
-
-inline Curve::state_t iterative_set_point(Curve &self, sf::Vector2f const p,
-    sf::Color const c, Curve::state_t const &s) {
-  if (s.segment >= get_segment(self)) set_segment(self, s.segment, s.c, c);
-  return iterative_set_point(self, p, {s.segment, s.p, c});
-}
-
 template<std::size_t mode>
 struct Visualizer {};
 
@@ -328,7 +186,8 @@ struct Visualizer<args::get_mode_index(modes_visualizer, "time-series")> {
   }
 
   Visualizer(std::size_t const n_channels, std::size_t const n_timepoints,
-      sf::Color const color, float const y_scale, bool const scrolling = true) :
+      sf::Color const &color, float const y_scale,
+      bool const scrolling = true) :
       y_scale{y_scale}, scrolling{scrolling},
       vertexess{std::vector<sf::VertexArray>(n_channels,
         sf::VertexArray(sf::LineStrip, n_timepoints))} {
@@ -402,7 +261,7 @@ struct Visualizer<
   float y_range_db() const { return this->y_max_db - this->y_min_db; }
 
   Visualizer(std::size_t const n_in, auto &&window_function,
-      sf::Color const color, float const x_min, float const x_max,
+      sf::Color const &color, float const x_min, float const x_max,
       float const y_min_db, float const y_max_db, float const thickness) :
       n_in{n_in}, x_min{x_min}, x_max{x_max},
       y_min_db{y_min_db}, y_max_db{y_max_db},
