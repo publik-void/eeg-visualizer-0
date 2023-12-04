@@ -46,4 +46,4 @@ mkdir -p $HOME/lsl_api && printf "[log]\nlevel = -2" > $HOME/lsl_api/lsl_api.cfg
 Caution: If a configuration file already exists at ~$HOME/lsl_api~, it will be
 overwritten by the above command. There are multiple possible locations for LSL
 configuration files. It is recommended to use the same configuration on all
-   servers and clients on a network. Also see the [[https://labstreaminglayer.readthedocs.io/info/lslapicfg.html?highlight=log#configuration-file-locations][LSL documentation]].
+servers and clients on a network. Also see the [[https://labstreaminglayer.readthedocs.io/info/lslapicfg.html?highlight=log#configuration-file-locations][LSL documentation]].
