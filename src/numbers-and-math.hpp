@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cmath>
+#include <array>
 
 // Some of the less up-to-date compilers don't have `std::numbers` as of writing
 // this, so this file serves as a replacement.
@@ -11,10 +12,26 @@ template <typename T>
 T constexpr pi_halves{static_cast<T>(1.57079632679489661923132169164)};
 
 template <typename T>
+T constexpr two_pi{static_cast<T>(6.28318530717958647692528676656)};
+
+template <typename T>
 T constexpr sqrt_two{static_cast<T>(1.41421356237309504880168872421)};
 
 template <typename T>
 T constexpr sqrt_one_half{static_cast<T>(.707106781186547524400844362105)};
+
+template <typename T>
+T constexpr three_hundred_and_sixty{static_cast<T>(360)};
+
+template <typename T, bool inv = false>
+std::array<T, 2> constexpr rotate(std::array<T, 2> const &v, T const &theta) {
+  auto const &[x0, x1]{v};
+  T const y0{std::cos(theta)}, y1{std::sin(theta)};
+  if constexpr (not inv)
+    return {x0 * y0 - x1 * y1, x0 * y1 + x1 * y0};
+  else
+    return {x0 * y0 + x1 * y1, x1 * y0 - x0 * y1};
+}
 
 // `std::cyl_bessel_j` does not exist on AppleClang as of writing this, so
 // here's a polynomial approximation for the zeroth-order function.

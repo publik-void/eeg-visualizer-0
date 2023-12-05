@@ -42,6 +42,20 @@ args::modes_t<4> constexpr modes_visualizer{"error", "help", "time-series",
 std::array<args::desc_t, 4> constexpr modes_descs_visualizer{nullptr, nullptr,
   desc_time_series, desc_short_time_spectrum};
 
+template<typename T>
+std::array<T, 2> sf_vec_to_array(sf::Vector2<T> const &v) {
+  return {v.x, v.y};
+}
+
+template<typename T>
+sf::Vector2<T> array_to_sf_vec(std::array<T, 2> const &v) {
+  return {std::get<0>(v), std::get<1>(v)};
+}
+
+template <bool inv = false>
+sf::Vector2f rotate(sf::Vector2f const &v, float const theta) {
+  return array_to_sf_vec(rotate<float, inv>(sf_vec_to_array(v), theta));
+}
 
 struct Buffer;
 inline std::size_t get_scalar_index(Buffer const &,
@@ -332,27 +346,45 @@ void draw(ShortTimeSpectrum &self, Buffer const &buffer,
 void pan(sf::RenderTarget &target, int const &delta_x, int const &delta_y,
     bool const fine){
   sf::View view{target.getView()};
+  float rotation_view{view.getRotation()};
+  float theta{rotation_view * (two_pi<float> / three_hundred_and_sixty<float>)};
   sf::Vector2f size_view{view.getSize()};
   sf::Vector2u const size_target{target.getSize()};
-  if (fine) size_view *= .1f;
-  view.move(delta_x * (size_view.x / size_target.x),
-            delta_y * (size_view.y / size_target.y));
+
+  sf::Vector2f delta{static_cast<float>(delta_x), static_cast<float>(delta_y)};
+  delta = {delta.x / size_target.x, delta.y / size_target.y};
+  delta = {delta.x * size_view.x, delta.y * size_view.y};
+  delta = rotate(delta, theta);
+  if (fine) delta *= .1f;
+
+  view.move(delta);
   target.setView(view);
 }
 
 void zoom_anchored(sf::RenderTarget &target, float const &delta_x,
     float const &delta_y, sf::Vector2i const &anchor_target, bool const fine){
-  float const factor{fine ? .005f : .05f};
-  sf::Vector2f const alpha{std::exp2(factor * delta_x),
-                           std::exp2(factor * delta_y)};
+  // TODO: Fix rotation awareness
 
   sf::View view{target.getView()};
   sf::Vector2u const size_target{target.getSize()};
   sf::Vector2f const size_view{view.getSize()};
   sf::Vector2f const center_view{view.getCenter()};
-  sf::Vector2f const anchor_view{
-    anchor_target.x * (size_view.x / size_target.x) + center_view.x,
-    anchor_target.y * (size_view.y / size_target.y) + center_view.y};
+  float rotation_view{view.getRotation()};
+  float theta{rotation_view * (two_pi<float> / three_hundred_and_sixty<float>)};
+
+  sf::Vector2f const delta{static_cast<float>(delta_x),
+                           static_cast<float>(delta_y)};
+  float const factor{fine ? .005f : .05f};
+  sf::Vector2f const alpha{std::exp2(factor * delta.x),
+                           std::exp2(factor * delta.y)};
+
+  sf::Vector2f anchor_view{
+    static_cast<float>(anchor_target.x) / size_target.x,
+    static_cast<float>(anchor_target.y) / size_target.y};
+  //anchor_view = rotate<true>(anchor_view, theta);
+  anchor_view = {anchor_view.x * size_view.x,
+                 anchor_view.y * size_view.y};
+  anchor_view += center_view;
   sf::Vector2f const size_view_new{size_view.x * alpha.x,
                                    size_view.y * alpha.y};
 
@@ -361,8 +393,12 @@ void zoom_anchored(sf::RenderTarget &target, float const &delta_x,
       anchor_view.x - .5f * (size_view.x - size_view_new.x),
     (center_view.y - anchor_view.y) * alpha.y +
       anchor_view.y - .5f * (size_view.y - size_view_new.y)};
-  target.setView({center_view_new, size_view_new});
+  sf::View view_new{center_view_new, size_view_new};
+  view_new.setRotation(rotation_view);
+  target.setView(view_new);
 }
+
+// TODO: void rotate_anchored(…
 
 args::flag_descs_t const flag_descs_visualizer{
   {"use-compute-thread", "Separate the data processing from the graphical "
@@ -504,6 +540,7 @@ int main_client_visualizer(args::args_t::const_iterator &pos,
   unsigned int const frame_rate_limit{args::parse_opt(
     args::parse_unsigned_int, opts_visualizer["frame-rate-limit"])};
   bool const vertical_sync{not flags_visualizer["no-vertical-sync"]};
+  //sf::View const default_view{{0.f, 1.f, 1.f, -1.f}};
   sf::View const default_view{{0.f, 1.f, 1.f, -1.f}};
   auto const mouse_button_move{sf::Mouse::Left};
   auto const mouse_button_scale{sf::Mouse::Right};
