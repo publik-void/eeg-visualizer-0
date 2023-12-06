@@ -708,8 +708,11 @@ int main_client_visualizer(args::args_t::const_iterator &pos,
         }
       }
       else if (event.type == sf::Event::MouseWheelScrolled) {
-        float const factor{10.f};
-        delta = delta_plus(factor * event.mouseWheelScroll.delta, 0.f);
+        float const factor{-10.f};
+        if (event.mouseWheelScroll.wheel == sf::Mouse::Wheel::HorizontalWheel)
+          delta = delta_plus(factor * event.mouseWheelScroll.delta, 0.f);
+        else
+          delta = delta_plus(0.f, factor * event.mouseWheelScroll.delta);
         anchor_window = anchor_window.value_or(
           sf::Vector2i{event.mouseWheelScroll.x, event.mouseWheelScroll.y});
       } else if (event.type == sf::Event::KeyPressed) {
