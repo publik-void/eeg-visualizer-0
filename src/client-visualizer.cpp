@@ -22,7 +22,8 @@
 
 #include "signal-handling.hpp"
 #include "args.hpp"
-#include "numbers-and-math.hpp"
+#include "numbers.hpp"
+#include "affine.hpp"
 #include "dsp.hpp"
 #include "plotting.hpp"
 #include "lsl-customized.hpp"
