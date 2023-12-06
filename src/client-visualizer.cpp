@@ -343,6 +343,13 @@ void draw(ShortTimeSpectrum &self, Buffer const &buffer,
   draw(target, self.graph);
 }
 
+// TODO: I chose to work with the `sf::View` here to easily pan, zoom and rotate
+// the entire plot. I think this was a mistake. I should instead work with a
+// view that simply reflects the window size in pixels, and then do panning and
+// zooming myself. Rotation might just be unnecessarily complicating things. I
+// plan on implementing panning and zooming both for the plot axes, as well as
+// the whole plot itself.
+
 void pan(sf::RenderTarget &target, int const &delta_x, int const &delta_y,
     bool const fine){
   sf::View view{target.getView()};
@@ -370,13 +377,13 @@ void zoom_anchored(sf::RenderTarget &target, float const &delta_x,
   sf::Vector2f const size_view{view.getSize()};
   sf::Vector2f const center_view{view.getCenter()};
   float rotation_view{view.getRotation()};
-  float theta{rotation_view * (two_pi<float> / three_hundred_and_sixty<float>)};
+  //float theta{rotation_view * (two_pi<float> / three_hundred_and_sixty<float>)};
 
   sf::Vector2f const delta{static_cast<float>(delta_x),
                            static_cast<float>(delta_y)};
-  float const factor{fine ? .005f : .05f};
-  sf::Vector2f const alpha{std::exp2(factor * delta.x),
-                           std::exp2(factor * delta.y)};
+  float const factor{fine ? .0005f : .005f};
+  sf::Vector2f const alpha{std::exp2( factor * delta.x),
+                           std::exp2(-factor * delta.y)};
 
   sf::Vector2f anchor_view{
     static_cast<float>(anchor_target.x) / size_target.x,
@@ -398,7 +405,22 @@ void zoom_anchored(sf::RenderTarget &target, float const &delta_x,
   target.setView(view_new);
 }
 
-// TODO: void rotate_anchored(…
+void rotate_anchored(sf::RenderTarget &target, float delta,
+    sf::Vector2i const &/*anchor_target*/, bool const fine) {
+  // TODO: Anchor awareness
+
+  float const factor{fine ? -.01f : -.1f};
+  delta *= factor;
+
+  sf::View view{target.getView()};
+  auto const size_view{view.getSize()};
+  float rotation_view{view.getRotation()};
+
+  view.setSize(rotate<true>(size_view,
+    delta * (two_pi<float> / three_hundred_and_sixty<float>)));
+  view.setRotation(rotation_view + delta);
+  target.setView(view);
+}
 
 args::flag_descs_t const flag_descs_visualizer{
   {"use-compute-thread", "Separate the data processing from the graphical "
@@ -542,10 +564,18 @@ int main_client_visualizer(args::args_t::const_iterator &pos,
   bool const vertical_sync{not flags_visualizer["no-vertical-sync"]};
   //sf::View const default_view{{0.f, 1.f, 1.f, -1.f}};
   sf::View const default_view{{0.f, 1.f, 1.f, -1.f}};
-  auto const mouse_button_move{sf::Mouse::Left};
-  auto const mouse_button_scale{sf::Mouse::Right};
+  auto const mouse_button_mod_switch{sf::Mouse::Right};
+  auto const key_left{sf::Keyboard::Left};
+  auto const key_right{sf::Keyboard::Right};
+  auto const key_down{sf::Keyboard::Down};
+  auto const key_up{sf::Keyboard::Up};
   auto const key_reset{sf::Keyboard::Enter};
-  auto const key_fine{sf::Keyboard::LShift};
+  auto const key_mod_view{sf::Keyboard::LShift};
+  auto const key_mod_mode{sf::Keyboard::LControl};
+  auto const key_mod_fine{sf::Keyboard::LAlt};
+  auto const key_mod_switch{sf::Keyboard::RShift};
+  auto const double_click_min_duration{std::chrono::milliseconds(0)};
+  auto const double_click_max_duration{std::chrono::milliseconds(300)};
 
   // Set up LSL input and buffer
   auto lsl_attachment_var{lsl::attach(property, value,
@@ -631,34 +661,118 @@ int main_client_visualizer(args::args_t::const_iterator &pos,
   window.setFramerateLimit(frame_rate_limit);
   window.setVerticalSyncEnabled(vertical_sync);
   window.setView(default_view);
+
   sf::Event event{};
   sf::Vector2i mouse_pos_prev{};
   std::optional<sf::Vector2i> anchor_window{};
+  std::chrono::high_resolution_clock clock{};
+  std::chrono::high_resolution_clock::time_point mouse_button_left_tic{
+    std::chrono::high_resolution_clock::time_point::max()};
+  std::chrono::high_resolution_clock::time_point mouse_button_left_toc{
+    std::chrono::high_resolution_clock::time_point::max()};
+  std::chrono::high_resolution_clock::time_point frame_tic{
+    std::chrono::high_resolution_clock::time_point::max()};
+  std::chrono::high_resolution_clock::time_point frame_toc{
+    std::chrono::high_resolution_clock::time_point::max()};
 
   while (window.isOpen()) {
+    frame_tic = frame_toc;
+    frame_toc = std::chrono::high_resolution_clock::now();
+    auto const frame_tictoc{frame_toc - frame_tic};
+
+    std::optional<sf::Vector2f> delta{};
+    auto const delta_plus{[&](float const x, float const y){
+        return delta.value_or(sf::Vector2f{0.f, 0.f}) + sf::Vector2f{x, y};
+      }};
+    bool reset{false};
+
+    sf::Vector2i const mouse_pos{sf::Mouse::getPosition(window)};
+    sf::Vector2i const mouse_delta{mouse_pos_prev - mouse_pos};
+    if (sf::Mouse::isButtonPressed(sf::Mouse::Left) or
+        sf::Mouse::isButtonPressed(sf::Mouse::Right)) {
+      delta = delta_plus(mouse_delta.x, mouse_delta.y);
+      if (not anchor_window.has_value()) anchor_window = mouse_pos_prev;
+    } else anchor_window = {};
+
     while (window.pollEvent(event)) {
-      if (event.type == sf::Event::Closed) graceful_exit_signal(true);
-      else if (event.type == sf::Event::MouseWheelScrolled)
-        zoom_anchored(window,
-          event.mouseWheelScroll.delta, event.mouseWheelScroll.delta,
-          {event.mouseWheelScroll.x, event.mouseWheelScroll.y},
-          sf::Keyboard::isKeyPressed(key_fine));
-      else if (event.type == sf::Event::KeyPressed and
-          event.key.code == key_reset) window.setView(default_view);
+      if (event.type == sf::Event::Closed)
+        graceful_exit_signal(true);
+      else if (event.type == sf::Event::MouseButtonPressed) {
+        if (event.mouseButton.button == sf::Mouse::Button::Left) {
+          mouse_button_left_tic = mouse_button_left_toc;
+          mouse_button_left_toc = clock.now();
+          auto const tictoc{mouse_button_left_toc - mouse_button_left_tic};
+          if (tictoc >= double_click_min_duration and
+              tictoc < double_click_max_duration)
+            reset = true;
+        }
+      }
+      else if (event.type == sf::Event::MouseWheelScrolled) {
+        float const factor{10.f};
+        delta = delta_plus(factor * event.mouseWheelScroll.delta, 0.f);
+        anchor_window = anchor_window.value_or(
+          sf::Vector2i{event.mouseWheelScroll.x, event.mouseWheelScroll.y});
+      } else if (event.type == sf::Event::KeyPressed) {
+        if (event.key.code == key_reset)
+          reset = true;
+      }
     }
     if (graceful_exit_signal()) break;
 
-    sf::Vector2i const mouse_pos{sf::Mouse::getPosition(window)};
-    if (sf::Mouse::isButtonPressed(mouse_button_move)) {
-      sf::Vector2i const mouse_delta{mouse_pos_prev - mouse_pos};
-      pan(window, mouse_delta.x, mouse_delta.y, sf::Keyboard::isKeyPressed(key_fine));
-    } else if (sf::Mouse::isButtonPressed(mouse_button_scale)) {
-      if (not anchor_window.has_value()) anchor_window = mouse_pos_prev;
-      sf::Vector2i const mouse_delta{mouse_pos_prev - mouse_pos};
-      float const factor{.1f};
-      zoom_anchored(window, factor * mouse_delta.x, factor * mouse_delta.y,
-        anchor_window.value(), sf::Keyboard::isKeyPressed(key_fine));
-    } else anchor_window = {};
+    {
+      float const factor{512.f};
+      float const step_size{factor *
+        std::chrono::duration_cast<std::chrono::duration<float>>(
+          std::max(frame_tictoc, decltype(frame_tictoc)::zero())).count()};
+      if (sf::Keyboard::isKeyPressed(key_left))
+        delta = delta_plus(step_size, 0.f);
+      if (sf::Keyboard::isKeyPressed(key_right))
+        delta = delta_plus(-step_size, 0.f);
+      if (sf::Keyboard::isKeyPressed(key_down))
+        delta = delta_plus(0.f, -step_size);
+      if (sf::Keyboard::isKeyPressed(key_up))
+        delta = delta_plus(0.f, step_size);
+    }
+
+    if (reset) {
+      if (sf::Keyboard::isKeyPressed(key_mod_view))
+        window.setView(default_view);
+      else
+        ; // TODO: Reset plot axes
+    } else if (delta.has_value()) {
+      auto const anchor_window_or_default{[&](){
+          if (anchor_window.has_value())
+            return anchor_window.value();
+          else
+            return static_cast<sf::Vector2i>(window.getSize() / 2u);
+        }};
+
+      bool mod_switch = false;
+      if (sf::Mouse::isButtonPressed(mouse_button_mod_switch))
+        mod_switch = not mod_switch;
+      if (sf::Keyboard::isKeyPressed(key_mod_switch))
+        mod_switch = not mod_switch;
+      bool const mod_mode{sf::Keyboard::isKeyPressed(key_mod_mode)};
+      bool const mod_fine{sf::Keyboard::isKeyPressed(key_mod_fine)};
+
+      if (sf::Keyboard::isKeyPressed(key_mod_view))
+        if (not mod_switch) {
+          if (not mod_mode)
+            pan(window, delta->x, delta->y, mod_fine);
+          else
+            rotate_anchored(window, delta->x, anchor_window_or_default(),
+              mod_fine);
+        } else {
+          if (not mod_mode)
+            zoom_anchored(window, delta->x, delta->y,
+              anchor_window_or_default(), mod_fine);
+          else
+            ; // Do nothing, for now
+        }
+      else
+        ; // TODO: Adjust plot axes
+    }
+
     mouse_pos_prev = mouse_pos;
 
     window.clear();
