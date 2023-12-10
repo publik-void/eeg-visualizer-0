@@ -1,7 +1,9 @@
+#include <type_traits>
 #include <cstddef>
 #include <cmath>
 #include <complex>
 #include <utility>
+#include <tuple>
 #include <memory>
 #include <optional>
 #include <array>
@@ -42,21 +44,6 @@ args::modes_t<4> constexpr modes_visualizer{"error", "help", "time-series",
 
 std::array<args::desc_t, 4> constexpr modes_descs_visualizer{nullptr, nullptr,
   desc_time_series, desc_short_time_spectrum};
-
-template<typename T>
-std::array<T, 2> sf_vec_to_array(sf::Vector2<T> const &v) {
-  return {v.x, v.y};
-}
-
-template<typename T>
-sf::Vector2<T> array_to_sf_vec(std::array<T, 2> const &v) {
-  return {std::get<0>(v), std::get<1>(v)};
-}
-
-template <bool inv = false>
-sf::Vector2f rotate(sf::Vector2f const &v, float const theta) {
-  return array_to_sf_vec(rotate<float, inv>(sf_vec_to_array(v), theta));
-}
 
 struct Buffer;
 inline std::size_t get_scalar_index(Buffer const &,
@@ -174,14 +161,91 @@ inline bool past_newest_sample(Buffer &buffer,
   return past_newest_sample(buffer, sample.first);
 }
 
+struct VisualizerSingle2DFrameBase {
+  Box<float> plot_box;
+  PlotAnnotations pa;
+  PlotAnnotationsStore pa_store;
+};
+
+Box<float> get_plot_to_frame_box(VisualizerSingle2DFrameBase const &self,
+    Box<float> const &parent_box) {
+  return box_to_box(self.plot_box, get_frame_box(self.pa, parent_box));
+}
+
+Box<float> get_frame_to_plot_box(VisualizerSingle2DFrameBase const &self,
+    Box<float> const &parent_box) {
+  return box_to_box(get_frame_box(self.pa, parent_box), self.plot_box);
+}
+
+void set_plot_ticks(VisualizerSingle2DFrameBase &self,
+    Box<PlotAnnotations::majors_t> const &majors,
+    Box<PlotAnnotations::minors_t> const &minors,
+    Box<float> const &parent_box) {
+  std::array<float, 2> plot_to_frame;
+  auto const set_edge{[&](auto &outs, auto const &ins, auto const &lerper){
+      if (outs.size() != ins.size()) outs.resize(ins.size());
+      std::transform(ins.begin(), ins.end(), outs.begin(), lerper);
+    }};
+  auto const lerp_minor{[&](PlotAnnotations::minor_t const &in){
+      return lerp(in, plot_to_frame);
+    }};
+  auto const lerp_major{[&](PlotAnnotations::major_t const &in){
+      auto const &[pos, label]{in};
+      return std::make_pair(lerp_minor(pos), label);
+    }};
+
+  auto const plot_to_frame_box{get_plot_to_frame_box(self, parent_box)};
+  plot_to_frame = plot_to_frame_box.xs();
+  set_edge(self.pa.majors.x0, majors.x0, lerp_major);
+  set_edge(self.pa.majors.x1, majors.x1, lerp_major);
+  set_edge(self.pa.minors.x0, minors.x0, lerp_minor);
+  set_edge(self.pa.minors.x1, minors.x1, lerp_minor);
+  plot_to_frame = plot_to_frame_box.ys();
+  set_edge(self.pa.majors.y0, majors.y0, lerp_major);
+  set_edge(self.pa.majors.y1, majors.y1, lerp_major);
+  set_edge(self.pa.minors.y0, minors.y0, lerp_minor);
+  set_edge(self.pa.minors.y1, minors.y1, lerp_minor);
+}
+
 template<std::size_t mode>
 struct Visualizer {};
+
+template<std::size_t mode>
+auto axes_pan(Visualizer<mode> &self, sf::Vector2f const &delta,
+    bool const fine, Box<float> const &parent_box){
+  float const factor{fine ? .1f : 1.f};
+  if constexpr (std::is_base_of_v<VisualizerSingle2DFrameBase,
+      Visualizer<mode>>) {
+    return self.plot_box -= scale(sf_vec_to_array(delta * factor),
+      get_frame_to_plot_box(self, parent_box));
+  }
+}
+
+template<std::size_t mode>
+auto axes_zoom(Visualizer<mode> &self, sf::Vector2f const &delta,
+    array2d<float, 2, 1> const &anchor, bool const fine,
+    Box<float> const &parent_box){
+  if constexpr (std::is_base_of_v<VisualizerSingle2DFrameBase,
+      Visualizer<mode>>) {
+    float const factor{(fine ? .1f : 1.f) * -.01f};
+    sf::Vector2f const alpha{std::exp2(delta.x * factor),
+                             std::exp2(delta.y * factor)};
+    auto const frame_to_plot_box{get_frame_to_plot_box(self, parent_box)};
+    auto const plot_anchor{lerp(anchor, frame_to_plot_box)};
+    self.plot_box *= sf_vec_to_array(alpha);
+    self.plot_box += sf_vec_to_array(sf::Vector2f{
+      ((get<0, 0>(plot_anchor) - self.plot_box.x0) * (1.f - alpha.x)),
+      ((get<1, 0>(plot_anchor) - self.plot_box.y0) * (1.f - alpha.y))});
+    return self.plot_box;
+  }
+}
 
 template<std::size_t mode>
 void compute(Visualizer<mode> &, Buffer &) {}
 
 template<std::size_t mode>
-void draw(Visualizer<mode> &, Buffer const &, sf::RenderTarget &) {}
+void draw(Visualizer<mode> &, Buffer const &, sf::RenderTarget &,
+    ViewTransform const &) {}
 
 template<>
 struct Visualizer<args::get_mode_index(modes_visualizer, "time-series")> {
@@ -215,7 +279,8 @@ struct Visualizer<args::get_mode_index(modes_visualizer, "time-series")> {
 using TimeSeries =
   Visualizer<args::get_mode_index(modes_visualizer, "time-series")>;
 
-void draw(TimeSeries &self, Buffer const &buffer, sf::RenderTarget &target) {
+void draw(TimeSeries &self, Buffer const &buffer, sf::RenderTarget &target,
+    ViewTransform const &vt) {
   std::size_t const n_timepoints{
     std::min(self.n_timepoints(), buffer.n_timepoints)};
   std::size_t const n_channels{
@@ -234,12 +299,11 @@ void draw(TimeSeries &self, Buffer const &buffer, sf::RenderTarget &target) {
 
 template<>
 struct Visualizer<
-      args::get_mode_index(modes_visualizer, "short-time-spectrum")>  {
+      args::get_mode_index(modes_visualizer, "short-time-spectrum")> : 
+    public VisualizerSingle2DFrameBase {
   // Parameters
   std::size_t n_in;
-  float x_min, x_max;
-  float y_min_db, y_max_db;
-  float thickness;
+  float curve_thickness;
 
   // State
   float * window, * in, * aggregate;
@@ -248,9 +312,7 @@ struct Visualizer<
   //sf::VertexArray vertexes;
   Curve graph;
 
-  std::size_t n_out() const {
-    return this->n_in / 2u + 1u;
-  }
+  std::size_t n_out() const { return this->n_in / 2u + 1u; }
 
   std::complex<float> * out_std() const {
     return reinterpret_cast<std::complex<float> *>(this->out);
@@ -263,24 +325,12 @@ struct Visualizer<
     return buffer.sample_rate() *
       (static_cast<float>(this->n_out() - 1) / this->n_in);
   }
-  float f_range(Buffer const &buffer) const {
-    return this->f_max(buffer) - this->f_min(buffer);
-  }
-
-  float x_min_log2() const { return std::log2(this->x_min); }
-  float x_max_log2() const { return std::log2(this->x_max); }
-  float x_range_log2() const { return this->x_max_log2() - this->x_min_log2(); }
-
-  float y_min() const { return std::exp2(this->y_min_db / 6.f); }
-  float y_max() const { return std::exp2(this->y_max_db / 6.f); }
-  float y_range_db() const { return this->y_max_db - this->y_min_db; }
 
   Visualizer(std::size_t const n_in, auto &&window_function,
-      sf::Color const &color, float const x_min, float const x_max,
-      float const y_min_db, float const y_max_db, float const thickness) :
-      n_in{n_in}, x_min{x_min}, x_max{x_max},
-      y_min_db{y_min_db}, y_max_db{y_max_db},
-      thickness{thickness},
+      Box<float> const &plot_box, RGB8 const &color,
+      float const curve_thickness, PlotAnnotations const &pa) :
+      VisualizerSingle2DFrameBase{plot_box, pa, {}},
+      n_in{n_in}, curve_thickness{curve_thickness},
       window{[&](){
         float * const window{
           static_cast<float *>(fftwf_malloc(sizeof(float) * n_in))};
@@ -293,12 +343,7 @@ struct Visualizer<
       out{static_cast<fftwf_complex *>(
         fftwf_malloc(sizeof(fftwf_complex) * this->n_out()))},
       plan{fftwf_plan_dft_r2c_1d(n_in, in, out, FFTW_ESTIMATE)},
-      //vertexes{[&](){
-      //  sf::VertexArray vertexes(sf::LineStrip, this->n_out() - 1);
-      //  for (std::size_t i{0}; i < vertexes.getVertexCount(); ++i)
-      //    vertexes[i].color = color;
-      //  return vertexes; }()}
-      graph(this->n_out() - 1, color, {}) {}
+      graph(this->n_out() - 1, color) {}
 
   ~Visualizer() {
     fftwf_destroy_plan(this->plan);
@@ -329,98 +374,22 @@ void compute(ShortTimeSpectrum &self, Buffer &buffer) {
 }
 
 void draw(ShortTimeSpectrum &self, Buffer const &buffer,
-    sf::RenderTarget &target) {
-  self.graph.thickness_2d = thickness_px_to_2d(self.thickness, target);
-  auto s{iterative_set_init(self.graph)};
+    sf::RenderTarget &target, ViewTransform const &vt) {
+  auto render_target_box{get_render_target_box(target)};
+  auto plot_to_frame_box{get_plot_to_frame_box(self, render_target_box)};
+  auto s{iterative_set_init(self.graph,
+    {self.curve_thickness * .5f, self.curve_thickness * .5f})};
   for (std::size_t i{1}; i < self.n_out(); ++i) {
-    float const x{(std::log2(self.f_min(buffer) + self.f_range(buffer) *
-        static_cast<float>(i - 1) / (self.n_out() - 2)) -
-      self.x_min_log2()) / self.x_range_log2()};
-    float const y{(self.aggregate[i] - self.y_min_db) / self.y_range_db()};
-    //self.vertexes[i - 1].position = sf::Vector2f{x, y};
-    s = iterative_set_point(self.graph, {x, y}, s);
+    float const i_l2Hz{dsp::to_l2Hz(lerp(static_cast<float>(i - 1),
+      {0.f, static_cast<float>(self.n_out() - 2)},
+      {self.f_min(buffer), self.f_max(buffer)}))};
+    std::array<float, 2> const p{i_l2Hz, self.aggregate[i]};
+    s = iterative_set_point(self.graph, s, vt,
+      array_to_sf_vec(lerp(p, plot_to_frame_box)), {});
   }
-  //target.draw(self.vertexes);
+  draw_underlay(target, self.pa_store);
   draw(target, self.graph);
-}
-
-// TODO: I chose to work with the `sf::View` here to easily pan, zoom and rotate
-// the entire plot. I think this was a mistake. I should instead work with a
-// view that simply reflects the window size in pixels, and then do panning and
-// zooming myself. Rotation might just be unnecessarily complicating things. I
-// plan on implementing panning and zooming both for the plot axes, as well as
-// the whole plot itself.
-
-void pan(sf::RenderTarget &target, int const &delta_x, int const &delta_y,
-    bool const fine){
-  sf::View view{target.getView()};
-  float rotation_view{view.getRotation()};
-  float theta{rotation_view * (two_pi<float> / three_hundred_and_sixty<float>)};
-  sf::Vector2f size_view{view.getSize()};
-  sf::Vector2u const size_target{target.getSize()};
-
-  sf::Vector2f delta{static_cast<float>(delta_x), static_cast<float>(delta_y)};
-  delta = {delta.x / size_target.x, delta.y / size_target.y};
-  delta = {delta.x * size_view.x, delta.y * size_view.y};
-  delta = rotate(delta, theta);
-  if (fine) delta *= .1f;
-
-  view.move(delta);
-  target.setView(view);
-}
-
-void zoom_anchored(sf::RenderTarget &target, float const &delta_x,
-    float const &delta_y, sf::Vector2i const &anchor_target, bool const fine){
-  // TODO: Fix rotation awareness
-
-  sf::View view{target.getView()};
-  sf::Vector2u const size_target{target.getSize()};
-  sf::Vector2f const size_view{view.getSize()};
-  sf::Vector2f const center_view{view.getCenter()};
-  float rotation_view{view.getRotation()};
-  //float theta{rotation_view * (two_pi<float> / three_hundred_and_sixty<float>)};
-
-  sf::Vector2f const delta{static_cast<float>(delta_x),
-                           static_cast<float>(delta_y)};
-  float const factor{fine ? .0005f : .005f};
-  sf::Vector2f const alpha{std::exp2( factor * delta.x),
-                           std::exp2(-factor * delta.y)};
-
-  sf::Vector2f anchor_view{
-    static_cast<float>(anchor_target.x) / size_target.x,
-    static_cast<float>(anchor_target.y) / size_target.y};
-  //anchor_view = rotate<true>(anchor_view, theta);
-  anchor_view = {anchor_view.x * size_view.x,
-                 anchor_view.y * size_view.y};
-  anchor_view += center_view;
-  sf::Vector2f const size_view_new{size_view.x * alpha.x,
-                                   size_view.y * alpha.y};
-
-  sf::Vector2f const center_view_new{
-    (center_view.x - anchor_view.x) * alpha.x +
-      anchor_view.x - .5f * (size_view.x - size_view_new.x),
-    (center_view.y - anchor_view.y) * alpha.y +
-      anchor_view.y - .5f * (size_view.y - size_view_new.y)};
-  sf::View view_new{center_view_new, size_view_new};
-  view_new.setRotation(rotation_view);
-  target.setView(view_new);
-}
-
-void rotate_anchored(sf::RenderTarget &target, float delta,
-    sf::Vector2i const &/*anchor_target*/, bool const fine) {
-  // TODO: Anchor awareness
-
-  float const factor{fine ? -.01f : -.1f};
-  delta *= factor;
-
-  sf::View view{target.getView()};
-  auto const size_view{view.getSize()};
-  float rotation_view{view.getRotation()};
-
-  view.setSize(rotate<true>(size_view,
-    delta * (two_pi<float> / three_hundred_and_sixty<float>)));
-  view.setRotation(rotation_view + delta);
-  target.setView(view);
+  draw_overlay(target, self.pa_store);
 }
 
 args::flag_descs_t const flag_descs_visualizer{
@@ -525,8 +494,8 @@ int main_client_visualizer(args::args_t::const_iterator &pos,
 
 
   // Parameters
-  std::string const property{opts_visualizer["lsl-property"].value()};
-  std::string const value{opts_visualizer["lsl-value"].value()};
+  std::string const lsl_property{opts_visualizer["lsl-property"].value()};
+  std::string const lsl_value{opts_visualizer["lsl-value"].value()};
   double const timeout_resolve{args::parse_opt(
     args::parse_double, opts_visualizer["timeout-resolve"])};
   double const timeout_open{args::parse_opt(
@@ -563,8 +532,19 @@ int main_client_visualizer(args::args_t::const_iterator &pos,
   unsigned int const frame_rate_limit{args::parse_opt(
     args::parse_unsigned_int, opts_visualizer["frame-rate-limit"])};
   bool const vertical_sync{not flags_visualizer["no-vertical-sync"]};
-  //sf::View const default_view{{0.f, 1.f, 1.f, -1.f}};
-  sf::View const default_view{{0.f, 1.f, 1.f, -1.f}};
+
+  float const ui_scale{1.f};
+
+  sf::Vector2f const default_view_scale{1.f, 1.f},
+    default_view_offset{0.f, 0.f};
+  float const default_view_rotation{0.f};
+
+  Box<float> default_plot_box{0.f, 0.f, 1.f, 1.f};
+  Box<PlotAnnotations::majors_t> majors{{}, {}, {}, {}};
+  Box<PlotAnnotations::minors_t> minors{{}, {}, {}, {}};
+
+  sf::Color const background_color{0x00, 0x00, 0x00};
+
   auto const mouse_button_mod_switch{sf::Mouse::Right};
   auto const key_left{sf::Keyboard::Left};
   auto const key_right{sf::Keyboard::Right};
@@ -579,7 +559,7 @@ int main_client_visualizer(args::args_t::const_iterator &pos,
   auto const double_click_max_duration{std::chrono::milliseconds(300)};
 
   // Set up LSL input and buffer
-  auto lsl_attachment_var{lsl::attach(property, value,
+  auto lsl_attachment_var{lsl::attach(lsl_property, lsl_value,
       timeout_resolve, timeout_open)};
   if (lsl::has_failed(lsl_attachment_var))
     return lsl::exit_code(lsl_attachment_var);
@@ -601,7 +581,7 @@ int main_client_visualizer(args::args_t::const_iterator &pos,
     sf::Color const color{0xff, 0xff, 0xff, 0xff};
     float const y_scale{1.f};
     bool const scrolling{true};
-    return Visualizer<mode_visualizer>(
+    return TimeSeries(
       buffer.n_channels(), n_timepoints, color, y_scale, scrolling);
   } else if constexpr (mode_visualizer ==
       args::get_mode_index(modes_visualizer, "short-time-spectrum")) {
@@ -611,15 +591,60 @@ int main_client_visualizer(args::args_t::const_iterator &pos,
       std::round(buffer.sample_rate() * fft_duration))};
     auto const window_function{[](std::size_t const i, std::size_t const n){
       return dsp::window<float, dsp::WindowShape::blackman>(i, n, .16f); }};
-    sf::Color const color{0xff, 0xff, 0xff, 0xff};
-    float const x_min{.5f}, x_max{80.f}, y_min_db{-24.f}, y_max_db{48.f};
+    RGB8 const curve_color{0x55, 0x77, 0xff};
+    float const x_min{.5f}, x_max{80.f}, y_min_dB{-24.f}, y_max_dB{24.f};
+    default_plot_box = {dsp::to_l2Hz(x_min), y_min_dB,
+                        dsp::to_l2Hz(x_max), y_max_dB};
+    for (float const tick : {.2f, .3f, .4f, .5f, .6f, .7f, .8f, .9f, 2.f, 3.f,
+        4.f, 5.f, 6.f, 7.f, 8.f, 9.f, 20.f, 30.f, 40.f, 50.f, 60.f, 70.f, 80.f,
+        90.f})
+      minors.x0.push_back(dsp::to_l2Hz(tick));
+    for (float const tick : {.1f, 1.f, 10.f, 100.f})
+      majors.x0.push_back(PlotAnnotations::major_t{dsp::to_l2Hz(tick), {}});
+    for (float const tick : {-21.f, -18.f, -15.f, -9.f, -6.f, -3.f, 3.f, 6.f,
+        9.f, 15.f, 18.f, 21.f})
+      minors.y0.push_back(tick);
+    for (float const tick : {-24.f, -12.f, 0.f, 12.f, 24.f})
+      majors.y0.push_back(PlotAnnotations::major_t{tick, {}});
+    float const curve_thickness{4.f};
 
     if (n_in > buffer.n_timepoints) throw(std::out_of_range{"Requested FFT "
       "size (" + std::to_string(n_in) + ") is bigger than available buffer "
       "size (" + std::to_string(buffer.n_timepoints) + ")"});
 
-    return Visualizer<mode_visualizer>(n_in, window_function, color,
-      x_min, x_max, y_min_db, y_max_db, 5.f);
+    PlotAnnotations const pa{
+          {}, {}, {},
+          {PlotAnnotations::TicksMode::on,
+            PlotAnnotations::TicksMode::on,
+            PlotAnnotations::TicksMode::alt,
+            PlotAnnotations::TicksMode::alt},
+          {PlotAnnotations::TicksMode::on,
+            PlotAnnotations::TicksMode::on,
+            PlotAnnotations::TicksMode::alt,
+            PlotAnnotations::TicksMode::alt},
+          {PlotAnnotations::TicksMode::on,
+            PlotAnnotations::TicksMode::on,
+            PlotAnnotations::TicksMode::off,
+            PlotAnnotations::TicksMode::off},
+          {PlotAnnotations::TicksMode::on,
+            PlotAnnotations::TicksMode::on,
+            PlotAnnotations::TicksMode::off,
+            PlotAnnotations::TicksMode::off},
+          {0x7f, 0x7f, 0x7f}, 0xff,
+          {0xff, 0xff, 0xff}, 0x37,
+          {0xff, 0xff, 0xff}, 0x15,
+          {0x00, 0x00, 0x00}, 0xcc,
+          ui_scale * 7.f,
+          ui_scale * 3.5f,
+          ui_scale * 3.f,
+          ui_scale * 2.f,
+          ui_scale * 2.f,
+          ui_scale * 40.f,
+          ui_scale * 40.f,
+          ui_scale * 512.f};
+
+    return ShortTimeSpectrum(n_in, window_function, default_plot_box,
+      curve_color, ui_scale * curve_thickness, pa);
   } else {
     return Visualizer<mode_visualizer>{};
   }}()};
@@ -661,11 +686,92 @@ int main_client_visualizer(args::args_t::const_iterator &pos,
     static_cast<sf::Uint32>(window_style), window_context_settings};
   window.setFramerateLimit(frame_rate_limit);
   window.setVerticalSyncEnabled(vertical_sync);
-  window.setView(default_view);
+
+  sf::Cursor cursor_default;
+  sf::Cursor cursor_cross;
+  bool const cursor_default_supported{
+    cursor_default.loadFromSystem(sf::Cursor::Arrow)};
+  bool const cursor_cross_supported{
+    cursor_cross.loadFromSystem(sf::Cursor::Cross)};
+
+  sf::Vector2f view_offset, view_scale;
+  float view_rotation;
+  ViewTransform view_transform, view_transform_inv;
+  auto const update_time_invariant_annotations{[&](){
+      if constexpr (std::is_base_of_v<VisualizerSingle2DFrameBase,
+          decltype(visualizer)>) {
+        auto const render_target_box{get_render_target_box(window)};
+        set_plot_ticks(visualizer, majors, minors, render_target_box);
+        lower(visualizer.pa_store, visualizer.pa, render_target_box,
+          view_transform, view_scale);
+      }
+    }};
+  auto const update_view_transform{[&](){
+      std::tie(view_transform, view_transform_inv) =
+        as_view_transform(view_scale, view_offset, view_rotation);
+      update_time_invariant_annotations();
+    }};
+  auto const view_reset{[&](bool offset = true, bool scale = true,
+        bool rotation = true){
+      if (offset) view_offset = default_view_offset;
+      if (scale) view_scale = default_view_scale;
+      if (rotation) view_rotation = default_view_rotation;
+      update_view_transform();
+    }};
+  view_reset();
+  auto const view_zoom{[&](sf::Vector2f const &delta,
+        array2d<float, 2, 1> const &anchor, bool const fine){
+      float const factor{(fine ? .1f : 1.f) * .01f};
+      auto const [r, r_inv]{as_rotation_matrix(view_rotation)};
+      array2d<float, 2, 1> const r_inv_delta{
+        muladd(r_inv, sf_vec_to_array2d(delta))};
+      sf::Vector2f const alpha{std::exp2(get<0, 0>(r_inv_delta) * factor),
+                               std::exp2(get<1, 0>(r_inv_delta) * factor)};
+      array2d<float, 2, 1> const r_inv_anchor{muladd(r_inv, anchor)};
+      view_offset += {
+        ((get<0, 0>(r_inv_anchor) - view_offset.x) * (1.f - alpha.x)),
+        ((get<1, 0>(r_inv_anchor) - view_offset.y) * (1.f - alpha.y))};
+      view_scale = {view_scale.x * alpha.x, view_scale.y * alpha.y};
+    }};
+  auto const view_pan{[&](sf::Vector2f const &delta, bool const fine){
+      float const factor{fine ? .1f : 1.f};
+      auto const [r, r_inv]{as_rotation_matrix(view_rotation)};
+      view_offset += array2d_to_sf_vec(
+        muladd(r_inv, sf_vec_to_array2d(delta * factor)));
+    }};
+  auto const view_rotate{[&](std::optional<sf::Vector2f> const &delta,
+        array2d<float, 2, 1> const &anchor, bool const fine){
+      float const factor{(fine ? .1f : 1.f) *
+        two_pi<float> / three_hundred_and_sixty<float>};
+      auto const [r_pre, r_pre_inv]{as_rotation_matrix(view_rotation)};
+      if (delta.has_value()) view_rotation += delta->x * factor;
+      else view_rotation = 0.f;
+      auto const [r_post, r_post_inv]{as_rotation_matrix(view_rotation)};
+      view_offset += array2d_to_sf_vec(add(neg(muladd(r_pre_inv, anchor)),
+        muladd(r_post_inv, anchor)));
+    }};
+
+  auto const axes_reset{[&](){
+      if constexpr (std::is_base_of_v<VisualizerSingle2DFrameBase,
+          decltype(visualizer)>) {
+        visualizer.plot_box = default_plot_box;
+        update_time_invariant_annotations();
+      }
+    }};
+  axes_reset();
+
+  auto const set_window_view{[&](){
+      sf::Vector2f const sz{window.getSize()};
+      window.setView(sf::View(sf::FloatRect(0.f, sz.y, sz.x, -sz.y)));
+      update_time_invariant_annotations();
+    }};
+  set_window_view();
 
   sf::Event event{};
   sf::Vector2i mouse_pos_prev{};
   std::optional<sf::Vector2i> anchor_window{};
+  sf::Vector2f anchor_window_center(window.getSize() / 2u);
+
   std::chrono::high_resolution_clock clock{};
   std::chrono::high_resolution_clock::time_point mouse_button_left_tic{
     std::chrono::high_resolution_clock::time_point::max()};
@@ -683,22 +789,32 @@ int main_client_visualizer(args::args_t::const_iterator &pos,
 
     std::optional<sf::Vector2f> delta{};
     auto const delta_plus{[&](float const x, float const y){
-        return delta.value_or(sf::Vector2f{0.f, 0.f}) + sf::Vector2f{x, y};
+        // `-y` below to account for flipped `sf::View`
+        return delta.value_or(sf::Vector2f{0.f, 0.f}) + sf::Vector2f{x, -y};
       }};
     bool reset{false};
 
     sf::Vector2i const mouse_pos{sf::Mouse::getPosition(window)};
-    sf::Vector2i const mouse_delta{mouse_pos_prev - mouse_pos};
-    if (sf::Mouse::isButtonPressed(sf::Mouse::Left) or
-        sf::Mouse::isButtonPressed(sf::Mouse::Right)) {
+    sf::Vector2i const mouse_delta{mouse_pos - mouse_pos_prev};
+    bool const any_mouse_button_pressed{
+      sf::Mouse::isButtonPressed(sf::Mouse::Left) or
+      sf::Mouse::isButtonPressed(sf::Mouse::Right)};
+    if (any_mouse_button_pressed) {
       delta = delta_plus(mouse_delta.x, mouse_delta.y);
       if (not anchor_window.has_value()) anchor_window = mouse_pos_prev;
-    } else anchor_window = {};
+      if (cursor_cross_supported) window.setMouseCursor(cursor_cross);
+    } else {
+      anchor_window = {};
+      if (cursor_default_supported) window.setMouseCursor(cursor_default);
+    }
 
     while (window.pollEvent(event)) {
       if (event.type == sf::Event::Closed)
         graceful_exit_signal(true);
-      else if (event.type == sf::Event::MouseButtonPressed) {
+      else if (event.type == sf::Event::Resized) {
+        set_window_view();
+        anchor_window_center = static_cast<sf::Vector2f>(window.getSize() / 2u);
+      } else if (event.type == sf::Event::MouseButtonPressed) {
         if (event.mouseButton.button == sf::Mouse::Button::Left) {
           mouse_button_left_tic = mouse_button_left_toc;
           mouse_button_left_toc = clock.now();
@@ -707,8 +823,7 @@ int main_client_visualizer(args::args_t::const_iterator &pos,
               tictoc < double_click_max_duration)
             reset = true;
         }
-      }
-      else if (event.type == sf::Event::MouseWheelScrolled) {
+      } else if (event.type == sf::Event::MouseWheelScrolled) {
         float const factor{-10.f};
         if (event.mouseWheelScroll.wheel == sf::Mouse::Wheel::HorizontalWheel)
           delta = delta_plus(factor * event.mouseWheelScroll.delta, 0.f);
@@ -729,60 +844,83 @@ int main_client_visualizer(args::args_t::const_iterator &pos,
         std::chrono::duration_cast<std::chrono::duration<float>>(
           std::max(frame_tictoc, decltype(frame_tictoc)::zero())).count()};
       if (sf::Keyboard::isKeyPressed(key_left))
-        delta = delta_plus(step_size, 0.f);
-      if (sf::Keyboard::isKeyPressed(key_right))
         delta = delta_plus(-step_size, 0.f);
+      if (sf::Keyboard::isKeyPressed(key_right))
+        delta = delta_plus(step_size, 0.f);
       if (sf::Keyboard::isKeyPressed(key_down))
-        delta = delta_plus(0.f, -step_size);
-      if (sf::Keyboard::isKeyPressed(key_up))
         delta = delta_plus(0.f, step_size);
+      if (sf::Keyboard::isKeyPressed(key_up))
+        delta = delta_plus(0.f, -step_size);
     }
 
+    auto const render_target_box{get_render_target_box(window)};
     if (reset) {
-      if (sf::Keyboard::isKeyPressed(key_mod_view))
-        window.setView(default_view);
-      else
-        ; // TODO: Reset plot axes
+      if (sf::Keyboard::isKeyPressed(key_mod_view)) {
+        if (not sf::Keyboard::isKeyPressed(key_mod_mode)) view_reset();
+        else {
+          if constexpr (std::is_base_of_v<VisualizerSingle2DFrameBase,
+              decltype(visualizer)>)
+            view_rotate({}, array_to_array2d(view_transform(get_frame_box(
+              visualizer.pa, render_target_box).center())), false);
+          }
+      } else
+        axes_reset();
     } else if (delta.has_value()) {
-      auto const anchor_window_or_default{[&](){
-          if (anchor_window.has_value())
-            return anchor_window.value();
-          else
-            return static_cast<sf::Vector2i>(window.getSize() / 2u);
-        }};
+      sf::Vector2f const anchor_window_or_center{anchor_window.has_value()
+        ? static_cast<sf::Vector2f>(anchor_window.value())
+        : anchor_window_center};
+      array2d<float, 2, 1> const anchor{array_to_array2d(lerp(
+        sf_vec_to_array(anchor_window_or_center),
+        render_target_box, sf_view_to_box(window.getView())))};
 
-      bool mod_switch = false;
-      if (sf::Mouse::isButtonPressed(mouse_button_mod_switch))
-        mod_switch = not mod_switch;
-      if (sf::Keyboard::isKeyPressed(key_mod_switch))
-        mod_switch = not mod_switch;
+      bool const mod_switch{sf::Mouse::isButtonPressed(mouse_button_mod_switch)
+        != sf::Keyboard::isKeyPressed(key_mod_switch)};
       bool const mod_mode{sf::Keyboard::isKeyPressed(key_mod_mode)};
       bool const mod_fine{sf::Keyboard::isKeyPressed(key_mod_fine)};
 
-      if (sf::Keyboard::isKeyPressed(key_mod_view))
+      if (sf::Keyboard::isKeyPressed(key_mod_view)) {
         if (not mod_switch) {
           if (not mod_mode)
-            pan(window, delta->x, delta->y, mod_fine);
+            view_pan(delta.value(), mod_fine);
           else
-            rotate_anchored(window, delta->x, anchor_window_or_default(),
-              mod_fine);
+            view_rotate(delta.value(), anchor, mod_fine);
         } else {
           if (not mod_mode)
-            zoom_anchored(window, delta->x, delta->y,
-              anchor_window_or_default(), mod_fine);
+            view_zoom(delta.value(), anchor, mod_fine);
           else
             ; // Do nothing, for now
         }
-      else
-        ; // TODO: Adjust plot axes
+      } else {
+        // TODO: Make plot axes adjustments `view_transform`-aware
+        //auto const [r, r_inv]{as_rotation_matrix(view_rotation)};
+        //auto const view_anchor{view_transform_inv(anchor)};
+        //auto const view_delta{array2d_to_sf_vec(muladd(view_transform_inv.a,
+        //  sf_vec_to_array2d(delta.value())))};
+        auto const view_anchor{anchor};
+        auto const view_delta{delta.value()};
+        if (not mod_switch) {
+          if (not mod_mode)
+            axes_pan(visualizer, view_delta, mod_fine, render_target_box);
+          else
+            ; // Do nothing, for now
+        } else {
+          if (not mod_mode)
+            axes_zoom(visualizer, view_delta, view_anchor, mod_fine,
+              render_target_box);
+          else
+            ; // Do nothing, for now
+        }
+      }
+      update_view_transform();
     }
+
 
     mouse_pos_prev = mouse_pos;
 
-    window.clear();
+    window.clear(background_color);
     double const nominal_frame_rate{60.};
     if (not use_compute_thread) compute_step(nominal_frame_rate);
-    draw(visualizer, buffer, window);
+    draw(visualizer, buffer, window, view_transform);
     window.display();
   }
 

@@ -14,6 +14,18 @@
 
 namespace dsp {
 
+template <typename T>
+T to_dB(T const &x) { return static_cast<T>(6) * std::log2(x); }
+
+template <typename T>
+T from_dB(T const &x) { return std::exp2(x / static_cast<T>(6)); }
+
+template <typename T>
+T to_l2Hz(T const &x) { return std::log2(x); }
+
+template <typename T>
+T from_l2Hz(T const &x) { return std::exp2(x); }
+
 template <std::size_t n, typename T>
 std::array<T, n> fill(T const &value = static_cast<T>(0),
     std::array<T, n> a = {}) {

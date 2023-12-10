@@ -42,6 +42,7 @@ int main_server_dummy(args::args_t::const_iterator &pos,
   std::random_device rd;
   std::mt19937 rng{rd()};
   std::uniform_real_distribution dist{-1.f, 1.f};
+  float amplitude{.2f};
   float dc_offset{2.f};
 
   auto const sampling_interval{
@@ -50,7 +51,7 @@ int main_server_dummy(args::args_t::const_iterator &pos,
   auto t{std::chrono::high_resolution_clock::now()};
 
   while (true) {
-    for (auto &x : sampling_buffer) x = dist(rng) + dc_offset;
+    for (auto &x : sampling_buffer) x = dist(rng) * amplitude + dc_offset;
 
     if (wait_until(t += sampling_interval)) break;
     outlet.push_sample(sampling_buffer);
