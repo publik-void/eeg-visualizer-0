@@ -37,10 +37,10 @@ struct Box {
                {{this->x1, this->y1 - std::get<1>(r)}}}}}};
   }
 
-  Box() {}
-  Box(T const &x0, T const &y0, T const &x1, T const &y1) :
+  constexpr Box() {}
+  constexpr Box(T const &x0, T const &y0, T const &x1, T const &y1) :
       x0{x0}, y0{y0}, x1{x1}, y1{y1} {}
-  Box(std::array<T, 2> const &p0, std::array<T, 2> const &p1) :
+  constexpr Box(std::array<T, 2> const &p0, std::array<T, 2> const &p1) :
       x0{std::get<0>(p0)}, y0{std::get<1>(p0)},
       x1{std::get<0>(p1)}, y1{std::get<1>(p1)} {}
 };

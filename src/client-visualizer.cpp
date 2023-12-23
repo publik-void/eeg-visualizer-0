@@ -24,6 +24,7 @@
 
 #include "signal-handling.hpp"
 #include "args.hpp"
+#include "number-printing.hpp"
 #include "numbers.hpp"
 #include "affine.hpp"
 #include "dsp.hpp"
@@ -168,19 +169,21 @@ struct VisualizerSingle2DFrameBase {
 };
 
 Box<float> get_plot_to_frame_box(VisualizerSingle2DFrameBase const &self,
-    Box<float> const &parent_box) {
-  return box_to_box(self.plot_box, get_frame_box(self.pa, parent_box));
+    Box<float> const &parent_box, sf::Vector2f const &view_scale) {
+  return box_to_box(self.plot_box, get_frame_box(self.pa, parent_box,
+    view_scale));
 }
 
 Box<float> get_frame_to_plot_box(VisualizerSingle2DFrameBase const &self,
-    Box<float> const &parent_box) {
-  return box_to_box(get_frame_box(self.pa, parent_box), self.plot_box);
+    Box<float> const &parent_box, sf::Vector2f const &view_scale) {
+  return box_to_box(get_frame_box(self.pa, parent_box, view_scale),
+    self.plot_box);
 }
 
 void set_plot_ticks(VisualizerSingle2DFrameBase &self,
     Box<PlotAnnotations::majors_t> const &majors,
     Box<PlotAnnotations::minors_t> const &minors,
-    Box<float> const &parent_box) {
+    Box<float> const &parent_box, sf::Vector2f const &view_scale) {
   std::array<float, 2> plot_to_frame;
   auto const set_edge{[&](auto &outs, auto const &ins, auto const &lerper){
       if (outs.size() != ins.size()) outs.resize(ins.size());
@@ -194,7 +197,8 @@ void set_plot_ticks(VisualizerSingle2DFrameBase &self,
       return std::make_pair(lerp_minor(pos), label);
     }};
 
-  auto const plot_to_frame_box{get_plot_to_frame_box(self, parent_box)};
+  auto const plot_to_frame_box{
+    get_plot_to_frame_box(self, parent_box, view_scale)};
   plot_to_frame = plot_to_frame_box.xs();
   set_edge(self.pa.majors.x0, majors.x0, lerp_major);
   set_edge(self.pa.majors.x1, majors.x1, lerp_major);
@@ -207,30 +211,50 @@ void set_plot_ticks(VisualizerSingle2DFrameBase &self,
   set_edge(self.pa.minors.y1, minors.y1, lerp_minor);
 }
 
+void draw_underlay(VisualizerSingle2DFrameBase const &self,
+    sf::RenderTarget &target, ViewTransform const &, sf::Vector2f const &) {
+  draw_underlay(target, self.pa_store);
+}
+
+void draw_overlay(VisualizerSingle2DFrameBase const &self,
+    sf::RenderTarget &target, ViewTransform const &vt,
+    sf::Vector2f const &view_scale) {
+  draw_overlay(target, self.pa_store);
+
+  if constexpr (draw_bounding_boxes) {
+    auto const target_box{get_render_target_box(target)},
+      frame_box{get_frame_box(self.pa, target_box, view_scale)};
+    draw_bounding_box(target, target_box, vt);
+    draw_bounding_box(target, frame_box, vt);
+  }
+}
+
 template<std::size_t mode>
 struct Visualizer {};
 
 template<std::size_t mode>
 auto axes_pan(Visualizer<mode> &self, sf::Vector2f const &delta,
-    bool const fine, Box<float> const &parent_box){
+    bool const fine, Box<float> const &parent_box,
+    sf::Vector2f const &view_scale){
   float const factor{fine ? .1f : 1.f};
   if constexpr (std::is_base_of_v<VisualizerSingle2DFrameBase,
       Visualizer<mode>>) {
     return self.plot_box -= scale(sf_vec_to_array(delta * factor),
-      get_frame_to_plot_box(self, parent_box));
+      get_frame_to_plot_box(self, parent_box, view_scale));
   }
 }
 
 template<std::size_t mode>
 auto axes_zoom(Visualizer<mode> &self, sf::Vector2f const &delta,
     array2d<float, 2, 1> const &anchor, bool const fine,
-    Box<float> const &parent_box){
+    Box<float> const &parent_box, sf::Vector2f const &view_scale) {
   if constexpr (std::is_base_of_v<VisualizerSingle2DFrameBase,
       Visualizer<mode>>) {
     float const factor{(fine ? .1f : 1.f) * -.01f};
     sf::Vector2f const alpha{std::exp2(delta.x * factor),
                              std::exp2(delta.y * factor)};
-    auto const frame_to_plot_box{get_frame_to_plot_box(self, parent_box)};
+    auto const frame_to_plot_box{
+      get_frame_to_plot_box(self, parent_box, view_scale)};
     auto const plot_anchor{lerp(anchor, frame_to_plot_box)};
     self.plot_box *= sf_vec_to_array(alpha);
     self.plot_box += sf_vec_to_array(sf::Vector2f{
@@ -245,7 +269,7 @@ void compute(Visualizer<mode> &, Buffer &) {}
 
 template<std::size_t mode>
 void draw(Visualizer<mode> &, Buffer const &, sf::RenderTarget &,
-    ViewTransform const &) {}
+    ViewTransform const &, sf::Vector2f const &) {}
 
 template<>
 struct Visualizer<args::get_mode_index(modes_visualizer, "time-series")> {
@@ -280,7 +304,7 @@ using TimeSeries =
   Visualizer<args::get_mode_index(modes_visualizer, "time-series")>;
 
 void draw(TimeSeries &self, Buffer const &buffer, sf::RenderTarget &target,
-    ViewTransform const &vt) {
+    ViewTransform const &vt, sf::Vector2f const &view_scale) {
   std::size_t const n_timepoints{
     std::min(self.n_timepoints(), buffer.n_timepoints)};
   std::size_t const n_channels{
@@ -374,9 +398,11 @@ void compute(ShortTimeSpectrum &self, Buffer &buffer) {
 }
 
 void draw(ShortTimeSpectrum &self, Buffer const &buffer,
-    sf::RenderTarget &target, ViewTransform const &vt) {
+    sf::RenderTarget &target, ViewTransform const &vt,
+    sf::Vector2f const &view_scale) {
   auto render_target_box{get_render_target_box(target)};
-  auto plot_to_frame_box{get_plot_to_frame_box(self, render_target_box)};
+  auto plot_to_frame_box{
+    get_plot_to_frame_box(self, render_target_box, view_scale)};
   auto s{iterative_set_init(self.graph,
     {self.curve_thickness * .5f, self.curve_thickness * .5f})};
   for (std::size_t i{1}; i < self.n_out(); ++i) {
@@ -387,9 +413,9 @@ void draw(ShortTimeSpectrum &self, Buffer const &buffer,
     s = iterative_set_point(self.graph, s, vt,
       array_to_sf_vec(lerp(p, plot_to_frame_box)), {});
   }
-  draw_underlay(target, self.pa_store);
+  draw_underlay(self, target, vt, view_scale);
   draw(target, self.graph);
-  draw_overlay(target, self.pa_store);
+  draw_overlay(self, target, vt, view_scale);
 }
 
 args::flag_descs_t const flag_descs_visualizer{
@@ -545,6 +571,10 @@ int main_client_visualizer(args::args_t::const_iterator &pos,
 
   sf::Color const background_color{0x00, 0x00, 0x00};
 
+  auto const font{std::make_shared<sf::Font>()};
+  font->loadFromFile("/System/Library/Fonts/Helvetica.ttc");
+  //font->setSmooth(true);
+
   auto const mouse_button_mod_switch{sf::Mouse::Right};
   auto const key_left{sf::Keyboard::Left};
   auto const key_right{sf::Keyboard::Right};
@@ -600,12 +630,14 @@ int main_client_visualizer(args::args_t::const_iterator &pos,
         90.f})
       minors.x0.push_back(dsp::to_l2Hz(tick));
     for (float const tick : {.1f, 1.f, 10.f, 100.f})
-      majors.x0.push_back(PlotAnnotations::major_t{dsp::to_l2Hz(tick), {}});
+      majors.x0.push_back(
+        PlotAnnotations::major_t{dsp::to_l2Hz(tick), {fancy(tick)}});
     for (float const tick : {-21.f, -18.f, -15.f, -9.f, -6.f, -3.f, 3.f, 6.f,
         9.f, 15.f, 18.f, 21.f})
       minors.y0.push_back(tick);
     for (float const tick : {-24.f, -12.f, 0.f, 12.f, 24.f})
-      majors.y0.push_back(PlotAnnotations::major_t{tick, {}});
+      majors.y0.push_back(
+        PlotAnnotations::major_t{tick, {fancy(tick)}});
     float const curve_thickness{4.f};
 
     if (n_in > buffer.n_timepoints) throw(std::out_of_range{"Requested FFT "
@@ -613,35 +645,46 @@ int main_client_visualizer(args::args_t::const_iterator &pos,
       "size (" + std::to_string(buffer.n_timepoints) + ")"});
 
     PlotAnnotations const pa{
-          {}, {}, {},
-          {PlotAnnotations::TicksMode::on,
-            PlotAnnotations::TicksMode::on,
-            PlotAnnotations::TicksMode::alt,
-            PlotAnnotations::TicksMode::alt},
-          {PlotAnnotations::TicksMode::on,
-            PlotAnnotations::TicksMode::on,
-            PlotAnnotations::TicksMode::alt,
-            PlotAnnotations::TicksMode::alt},
-          {PlotAnnotations::TicksMode::on,
-            PlotAnnotations::TicksMode::on,
-            PlotAnnotations::TicksMode::off,
-            PlotAnnotations::TicksMode::off},
-          {PlotAnnotations::TicksMode::on,
-            PlotAnnotations::TicksMode::on,
-            PlotAnnotations::TicksMode::off,
-            PlotAnnotations::TicksMode::off},
+          {}, {},
+          {{"Frequency [Hz]"}, {"Magnitude [dBFS]"}, {}, {}},
+          {PlotAnnotations::on,
+            PlotAnnotations::on | PlotAnnotations::vertical,
+            PlotAnnotations::on | PlotAnnotations::alt | PlotAnnotations::nolabel,
+            PlotAnnotations::on | PlotAnnotations::alt | PlotAnnotations::nolabel | PlotAnnotations::vertical},
+          {PlotAnnotations::on,
+            PlotAnnotations::on,
+            PlotAnnotations::on | PlotAnnotations::alt,
+            PlotAnnotations::on | PlotAnnotations::alt},
+          {PlotAnnotations::on,
+            PlotAnnotations::on,
+            PlotAnnotations::off,
+            PlotAnnotations::off},
+          {PlotAnnotations::on,
+            PlotAnnotations::on,
+            PlotAnnotations::off,
+            PlotAnnotations::off},
+          {PlotAnnotations::on | PlotAnnotations::italic,
+            PlotAnnotations::on | PlotAnnotations::italic | PlotAnnotations::vertical,
+            PlotAnnotations::off | PlotAnnotations::italic,
+            PlotAnnotations::off | PlotAnnotations::italic | PlotAnnotations::vertical},
           {0x7f, 0x7f, 0x7f}, 0xff,
           {0xff, 0xff, 0xff}, 0x37,
           {0xff, 0xff, 0xff}, 0x15,
+          {0x7f, 0x7f, 0x7f}, 0xff,
+          {0x7f, 0x7f, 0x7f}, 0xff,
           {0x00, 0x00, 0x00}, 0xcc,
           ui_scale * 7.f,
           ui_scale * 3.5f,
           ui_scale * 3.f,
           ui_scale * 2.f,
           ui_scale * 2.f,
-          ui_scale * 40.f,
-          ui_scale * 40.f,
-          ui_scale * 512.f};
+          ui_scale * 30.f,
+          ui_scale * 25.f,
+          ui_scale * 10.f,
+          ui_scale * 10.f,
+          ui_scale * 10.f,
+          ui_scale * 4096.f,
+          font};
 
     return ShortTimeSpectrum(n_in, window_function, default_plot_box,
       curve_color, ui_scale * curve_thickness, pa);
@@ -701,9 +744,10 @@ int main_client_visualizer(args::args_t::const_iterator &pos,
       if constexpr (std::is_base_of_v<VisualizerSingle2DFrameBase,
           decltype(visualizer)>) {
         auto const render_target_box{get_render_target_box(window)};
-        set_plot_ticks(visualizer, majors, minors, render_target_box);
+        set_plot_ticks(visualizer, majors, minors, render_target_box,
+          view_scale);
         lower(visualizer.pa_store, visualizer.pa, render_target_box,
-          view_transform, view_scale);
+          view_transform, view_scale, view_rotation);
       }
     }};
   auto const update_view_transform{[&](){
@@ -746,6 +790,11 @@ int main_client_visualizer(args::args_t::const_iterator &pos,
       auto const [r_pre, r_pre_inv]{as_rotation_matrix(view_rotation)};
       if (delta.has_value()) view_rotation += delta->x * factor;
       else view_rotation = 0.f;
+      { // Wrap back to [0, 2π)
+        view_rotation *= one_over_two_pi<float>;
+        view_rotation -= std::floor(view_rotation);
+        view_rotation *= two_pi<float>;
+      }
       auto const [r_post, r_post_inv]{as_rotation_matrix(view_rotation)};
       view_offset += array2d_to_sf_vec(add(neg(muladd(r_pre_inv, anchor)),
         muladd(r_post_inv, anchor)));
@@ -861,7 +910,8 @@ int main_client_visualizer(args::args_t::const_iterator &pos,
           if constexpr (std::is_base_of_v<VisualizerSingle2DFrameBase,
               decltype(visualizer)>)
             view_rotate({}, array_to_array2d(view_transform(get_frame_box(
-              visualizer.pa, render_target_box).center())), false);
+              visualizer.pa, render_target_box, view_scale).center())),
+                false);
           }
       } else
         axes_reset();
@@ -900,13 +950,14 @@ int main_client_visualizer(args::args_t::const_iterator &pos,
         auto const view_delta{delta.value()};
         if (not mod_switch) {
           if (not mod_mode)
-            axes_pan(visualizer, view_delta, mod_fine, render_target_box);
+            axes_pan(visualizer, view_delta, mod_fine, render_target_box,
+              view_scale);
           else
             ; // Do nothing, for now
         } else {
           if (not mod_mode)
             axes_zoom(visualizer, view_delta, view_anchor, mod_fine,
-              render_target_box);
+              render_target_box, view_scale);
           else
             ; // Do nothing, for now
         }
@@ -920,7 +971,7 @@ int main_client_visualizer(args::args_t::const_iterator &pos,
     window.clear(background_color);
     double const nominal_frame_rate{60.};
     if (not use_compute_thread) compute_step(nominal_frame_rate);
-    draw(visualizer, buffer, window, view_transform);
+    draw(visualizer, buffer, window, view_transform, view_scale);
     window.display();
   }
 

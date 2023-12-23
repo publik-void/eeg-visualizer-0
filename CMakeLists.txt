@@ -54,6 +54,8 @@ add_library(signal-handling STATIC src/signal-handling.cpp)
 
 add_library(args STATIC src/args.cpp)
 
+add_library(number-printing STATIC src/number-printing.cpp)
+
 add_library(dsp INTERFACE src/dsp.hpp)
 
 add_library(server-dummy STATIC src/server-dummy.cpp)
@@ -64,7 +66,7 @@ target_link_libraries(plotting PUBLIC sfml-graphics)
 
 add_library(client-visualizer STATIC src/client-visualizer.cpp)
 target_link_libraries(client-visualizer PUBLIC lsl-customized plotting
-  sfml-window sfml-graphics PkgConfig::FFTW)
+  number-printing sfml-window sfml-graphics PkgConfig::FFTW)
 
 add_executable(eeg-visualizer src/main.cpp)
 target_link_libraries(eeg-visualizer PUBLIC signal-handling args dsp

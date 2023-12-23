@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <optional>
 #include <utility>
+#include <memory>
 #include <vector>
 #include <string>
 
@@ -27,6 +28,22 @@ Box<float> get_render_target_box(sf::RenderTarget const &);
 Box<float> sf_view_to_box(sf::View const &);
 
 template <typename T>
+Box<T> sf_rect_to_box(sf::Rect<T> const &rect) {
+  return {rect.left, rect.top, rect.left + rect.width, rect.top + rect.height};
+}
+
+// For debugging
+bool constexpr draw_bounding_boxes{false};
+void draw_bounding_box(sf::RenderTarget &, Box<float> const &,
+    ViewTransform const &vt = ViewTransform::identity(),
+    sf::Color const & = {0x00, 0xff, 0xff, 0x7f},
+    sf::Color const & = {0xff, 0x00, 0xff, 0x7f});
+void draw_bounding_box(sf::RenderTarget &, sf::Text const &,
+    ViewTransform const &vt = ViewTransform::identity(),
+    sf::Color const & = {0x00, 0xff, 0xff, 0x7f},
+    sf::Color const & = {0xff, 0x00, 0xff, 0x7f});
+
+template <typename T>
 struct RGB {
   T r;
   T g;
@@ -35,7 +52,9 @@ struct RGB {
 
 using RGB8 = RGB<std::uint8_t>;
 
-inline sf::Color rgb_to_sf_color(RGB8 const &c) { return {c.r, c.g, c.b}; }
+inline sf::Color rgb_to_sf_color(RGB8 const &c, std::uint8_t const a = 0xff) {
+  return {c.r, c.g, c.b, a};
+}
 inline RGB8 sf_color_to_rgb(sf::Color const &c) { return {c.r, c.g, c.b}; }
 
 inline sf::Vertex * set_vertex(sf::Vertex * const vertex,
@@ -292,28 +311,42 @@ inline Fill::state_t iterative_set_point(Fill &self, Fill::state_t const &s,
 }
 
 struct PlotAnnotations {
+  using label_t = std::optional<std::string>;
   using minor_t = float;
-  using major_t = std::pair<minor_t, std::optional<std::string>>;
+  using major_t = std::pair<minor_t, label_t>;
   template <typename T> using container_t = std::vector<T>;
   using majors_t = container_t<major_t>;
   using minors_t = container_t<minor_t>;
 
-  enum struct TicksMode { off, on, alt };
+  using mode_t = std::uint8_t;
+  static mode_t constexpr off        {0b00000000};
+  static mode_t constexpr on         {0b00000001};
+  static mode_t constexpr alt        {0b00000010};
+  static mode_t constexpr nolabel    {0b00000100};
+  static mode_t constexpr bold       {0b00001000};
+  static mode_t constexpr italic     {0b00010000};
+  static mode_t constexpr underlined {0b00100000};
+  static mode_t constexpr vertical   {0b01000000};
+
+  static sf::Uint32 mode_to_sf_text_style(mode_t const);
 
   template <typename T> static T const empty;
 
   Box<majors_t> majors;
   Box<minors_t> minors;
-  Box<std::optional<std::string>> labels;
-  Box<TicksMode> tick_modes_major, tick_modes_minor, grid_modes_major,
-    grid_modes_minor;
+  Box<label_t> frame_labels;
+  Box<mode_t> modes_ticks_major, modes_ticks_minor, modes_grid_major,
+    modes_grid_minor, modes_frame_labels;
   RGB8 color_frame; std::uint8_t alpha_frame;
   RGB8 color_grid_major; std::uint8_t alpha_grid_major;
   RGB8 color_grid_minor; std::uint8_t alpha_grid_minor;
+  RGB8 color_frame_labels; std::uint8_t alpha_frame_labels;
+  RGB8 color_ticks_labels; std::uint8_t alpha_ticks_labels;
   RGB8 color_vignette; std::uint8_t alpha_vignette;
-  float tick_length_major, tick_length_minor, thickness_frame, thickness_tick,
-    thickness_grid, font_size_label, font_size_tick, vignette_factor;
-  sf::Font font;
+  float tick_length_major, tick_length_minor, thickness_frame, thickness_ticks,
+    thickness_grid, font_size_frame_labels, font_size_ticks_labels,
+    gap_ticks_labels, gap_frame_labels, gap_parent_box, vignette_factor;
+  std::shared_ptr<sf::Font> font;
 };
 
 Box<PlotAnnotations::majors_t const &> get_major_ticks_modemapped(
@@ -328,16 +361,22 @@ std::size_t n_major_ticks(PlotAnnotations const &);
 std::size_t n_minor_ticks(PlotAnnotations const &);
 std::size_t n_major_grids(PlotAnnotations const &);
 std::size_t n_minor_grids(PlotAnnotations const &);
-Box<float> get_frame_box(PlotAnnotations const &, Box<float> const &);
+std::size_t n_frame_labels(PlotAnnotations const &);
+std::size_t n_ticks_labels(PlotAnnotations const &);
+Box<float> get_frame_box(PlotAnnotations const &, Box<float> const &,
+    sf::Vector2f const &);
 
 struct PlotAnnotationsStore {
   Lines frame;
   Lines ticks;
   Lines grid;
   GraphBase vignette;
+  std::vector<sf::Text> labels_frame;
+  std::vector<sf::Text> labels_ticks;
 };
 
 void lower(PlotAnnotationsStore &, PlotAnnotations const &,
-  Box<float> const &, ViewTransform const &, sf::Vector2f const &);
+  Box<float> const &, ViewTransform const &, sf::Vector2f const &,
+  float const);
 void draw_underlay(sf::RenderTarget &, PlotAnnotationsStore const &);
 void draw_overlay(sf::RenderTarget &, PlotAnnotationsStore const &);
