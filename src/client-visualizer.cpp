@@ -11,6 +11,7 @@
 #include <vector>
 #include <algorithm>
 #include <thread>
+#include <mutex>
 #include <atomic>
 #include <chrono>
 
@@ -265,10 +266,10 @@ auto axes_zoom(Visualizer<mode> &self, sf::Vector2f const &delta,
 }
 
 template<std::size_t mode>
-void compute(Visualizer<mode> &, Buffer &) {}
+void compute(Visualizer<mode> &, std::mutex &, Buffer &) {}
 
 template<std::size_t mode>
-void draw(Visualizer<mode> &, Buffer const &, sf::RenderTarget &,
+void draw(Visualizer<mode> &, std::mutex &, Buffer const &, sf::RenderTarget &,
     ViewTransform const &, sf::Vector2f const &) {}
 
 template<>
@@ -303,8 +304,9 @@ struct Visualizer<args::get_mode_index(modes_visualizer, "time-series")> {
 using TimeSeries =
   Visualizer<args::get_mode_index(modes_visualizer, "time-series")>;
 
-void draw(TimeSeries &self, Buffer const &buffer, sf::RenderTarget &target,
-    ViewTransform const &vt, sf::Vector2f const &view_scale) {
+void draw(TimeSeries &self, std::mutex &compute_draw_mutex,
+    Buffer const &buffer, sf::RenderTarget &target, ViewTransform const &vt,
+    sf::Vector2f const &view_scale) {
   std::size_t const n_timepoints{
     std::min(self.n_timepoints(), buffer.n_timepoints)};
   std::size_t const n_channels{
@@ -380,7 +382,9 @@ struct Visualizer<
 using ShortTimeSpectrum =
   Visualizer<args::get_mode_index(modes_visualizer, "short-time-spectrum")>;
 
-void compute(ShortTimeSpectrum &self, Buffer &buffer) {
+void compute(ShortTimeSpectrum &self, std::mutex &compute_draw_mutex,
+    Buffer &buffer) {
+  std::scoped_lock lock{compute_draw_mutex};
   std::fill(self.aggregate, self.aggregate + self.n_out(), 0.f);
   for (std::size_t j{0}; j < buffer.n_channels(); ++j) {
     for (std::size_t i{0}; i < self.n_in; ++i)
@@ -397,21 +401,24 @@ void compute(ShortTimeSpectrum &self, Buffer &buffer) {
       return 6.f * std::log2(std::sqrt(x * (1.f / buffer.n_channels()))); });
 }
 
-void draw(ShortTimeSpectrum &self, Buffer const &buffer,
-    sf::RenderTarget &target, ViewTransform const &vt,
+void draw(ShortTimeSpectrum &self, std::mutex &compute_draw_mutex,
+    Buffer const &buffer, sf::RenderTarget &target, ViewTransform const &vt,
     sf::Vector2f const &view_scale) {
   auto render_target_box{get_render_target_box(target)};
   auto plot_to_frame_box{
     get_plot_to_frame_box(self, render_target_box, view_scale)};
   auto s{iterative_set_init(self.graph,
     {self.curve_thickness * .5f, self.curve_thickness * .5f})};
-  for (std::size_t i{1}; i < self.n_out(); ++i) {
-    float const i_l2Hz{dsp::to_l2Hz(lerp(static_cast<float>(i - 1),
-      {0.f, static_cast<float>(self.n_out() - 2)},
-      {self.f_min(buffer), self.f_max(buffer)}))};
-    std::array<float, 2> const p{i_l2Hz, self.aggregate[i]};
-    s = iterative_set_point(self.graph, s, vt,
-      array_to_sf_vec(lerp(p, plot_to_frame_box)), {});
+  {
+    std::scoped_lock lock{compute_draw_mutex};
+    for (std::size_t i{1}; i < self.n_out(); ++i) {
+      float const i_l2Hz{dsp::to_l2Hz(lerp(static_cast<float>(i - 1),
+        {0.f, static_cast<float>(self.n_out() - 2)},
+        {self.f_min(buffer), self.f_max(buffer)}))};
+      std::array<float, 2> const p{i_l2Hz, self.aggregate[i]};
+      s = iterative_set_point(self.graph, s, vt,
+        array_to_sf_vec(lerp(p, plot_to_frame_box)), {});
+    }
   }
   draw_underlay(self, target, vt, view_scale);
   draw(target, self.graph);
@@ -419,17 +426,19 @@ void draw(ShortTimeSpectrum &self, Buffer const &buffer,
 }
 
 args::flag_descs_t const flag_descs_visualizer{
-  {"use-compute-thread", "Separate the data processing from the graphical "
-    "processing thread."},
+  {"no-compute-thread", "Do not separate the data processing from the graphical"
+    " processing thread."},
   {"no-vertical-sync", nullptr},
   {"fullscreen", nullptr},
   {"no-highpass", "Disable preprocessing highpass filter."}};
 
 args::opt_descs_t const opt_descs_visualizer{
+  {"gui-scale", {"factor", "1", "Overall scaling factor for the graphical user "
+    "interface.", {}}},
   {"window-width", {"n", "1024", "Window width in pixels.", {}}},
   {"window-height", {"n", "768", "Window height in pixels.", {}}},
   {"bits-per-pixel", {"n", "32", nullptr, {}}},
-  {"antialiasing-level", {"n", "8", nullptr, {}}},
+  {"antialiasing-level", {"n", "16", nullptr, {}}},
   {"frame-rate-limit", {
     "f", "0", "Limit frame rate to <f> Hz.", {
       {"0", "Disable frame rate limit."}}}},
@@ -529,7 +538,7 @@ int main_client_visualizer(args::args_t::const_iterator &pos,
 
   double const buffer_duration{args::parse_opt(
     args::parse_double, opts_visualizer["buffer-duration"])};
-  bool const use_compute_thread{flags_visualizer["use-compute-thread"]};
+  bool const use_compute_thread{not flags_visualizer["no-compute-thread"]};
   double const update_rate{60.};
 
   long const ref_index{args::parse_opt(
@@ -559,7 +568,8 @@ int main_client_visualizer(args::args_t::const_iterator &pos,
     args::parse_unsigned_int, opts_visualizer["frame-rate-limit"])};
   bool const vertical_sync{not flags_visualizer["no-vertical-sync"]};
 
-  float const ui_scale{1.f};
+  float const gui_scale{args::parse_opt(
+    args::parse_float, opts_visualizer["gui-scale"])};
 
   sf::Vector2f const default_view_scale{1.f, 1.f},
     default_view_offset{0.f, 0.f};
@@ -673,26 +683,28 @@ int main_client_visualizer(args::args_t::const_iterator &pos,
           {0x7f, 0x7f, 0x7f}, 0xff,
           {0x7f, 0x7f, 0x7f}, 0xff,
           {0x00, 0x00, 0x00}, 0xcc,
-          ui_scale * 7.f,
-          ui_scale * 3.5f,
-          ui_scale * 3.f,
-          ui_scale * 2.f,
-          ui_scale * 2.f,
-          ui_scale * 30.f,
-          ui_scale * 25.f,
-          ui_scale * 10.f,
-          ui_scale * 10.f,
-          ui_scale * 10.f,
-          ui_scale * 4096.f,
+          gui_scale * 7.f,
+          gui_scale * 3.5f,
+          gui_scale * 3.f,
+          gui_scale * 2.f,
+          gui_scale * 2.f,
+          gui_scale * 30.f,
+          gui_scale * 25.f,
+          gui_scale * 10.f,
+          gui_scale * 10.f,
+          gui_scale * 10.f,
+          gui_scale * 4096.f,
           font};
 
     return ShortTimeSpectrum(n_in, window_function, default_plot_box,
-      curve_color, ui_scale * curve_thickness, pa);
+      curve_color, gui_scale * curve_thickness, pa);
   } else {
     return Visualizer<mode_visualizer>{};
   }}()};
 
   // Set up computation thread
+  std::mutex compute_draw_mutex;
+  
   auto const compute_step{[&](auto const /*update_rate*/){
       pull(buffer);
 
@@ -712,7 +724,7 @@ int main_client_visualizer(args::args_t::const_iterator &pos,
         }
       }
 
-      compute(visualizer, buffer);
+      compute(visualizer, compute_draw_mutex, buffer);
     }};
 
   std::thread t_compute;
@@ -971,7 +983,8 @@ int main_client_visualizer(args::args_t::const_iterator &pos,
     window.clear(background_color);
     double const nominal_frame_rate{60.};
     if (not use_compute_thread) compute_step(nominal_frame_rate);
-    draw(visualizer, buffer, window, view_transform, view_scale);
+    draw(visualizer, compute_draw_mutex, buffer, window, view_transform,
+        view_scale);
     window.display();
   }
 
