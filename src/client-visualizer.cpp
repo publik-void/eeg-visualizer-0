@@ -423,7 +423,7 @@ void draw(ShortTimeSpectrum &self, std::mutex &compute_draw_mutex,
       std::array<float, 2> const p{i_l2Hz, self.aggregate[i]};
       sf::Vector2f const p_v{array_to_sf_vec(lerp(p, plot_to_frame_box))};
       s = iterative_set_point(self.graph, s, vt,
-        p_v, {p_v.x, frame_box.y0}, {});
+        p_v, {{p_v.x, frame_box.y0}}, {});
     }
   }
   draw_underlay(self, target, vt, view_scale);

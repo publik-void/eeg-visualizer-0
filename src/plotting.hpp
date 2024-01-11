@@ -339,7 +339,7 @@ inline FillCurve::state_t iterative_set_init(FillCurve &self,
 
 inline FillCurve::state_t iterative_set_point(FillCurve &self,
     FillCurve::state_t const &s, ViewTransform const &vt,
-    sf::Vector2f const &p_v, sf::Vector2f const &p_f = {},
+    sf::Vector2f const &p_v, std::optional<sf::Vector2f> const &p_f = {},
     std::optional<RGB8> const &rgb_v = {},
     std::optional<RGB8> const &rgb_f = {},
     std::optional<float> const &a_v = {},
