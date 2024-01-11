@@ -336,7 +336,7 @@ struct Visualizer<
   fftwf_complex * out;
   fftwf_plan plan;
   //sf::VertexArray vertexes;
-  Curve graph;
+  FillCurve graph;
 
   std::size_t n_out() const { return this->n_in / 2u + 1u; }
 
@@ -353,10 +353,13 @@ struct Visualizer<
   }
 
   Visualizer(std::size_t const n_in, auto &&window_function,
-      Box<float> const &plot_box, RGB8 const &color,
-      float const curve_thickness, PlotAnnotations const &pa) :
+      Box<float> const &plot_box, RGB8 const &fill_color,
+      std::uint8_t const fill_alpha, RGB8 const &curve_color,
+      float const curve_thickness,
+      PlotAnnotations const &pa) :
       VisualizerSingle2DFrameBase{plot_box, pa, {}},
-      n_in{n_in}, curve_thickness{curve_thickness},
+      n_in{n_in},
+      curve_thickness{curve_thickness},
       window{[&](){
         float * const window{
           static_cast<float *>(fftwf_malloc(sizeof(float) * n_in))};
@@ -369,7 +372,8 @@ struct Visualizer<
       out{static_cast<fftwf_complex *>(
         fftwf_malloc(sizeof(fftwf_complex) * this->n_out()))},
       plan{fftwf_plan_dft_r2c_1d(n_in, in, out, FFTW_ESTIMATE)},
-      graph(this->n_out() - 1, color) {}
+      graph(this->n_out() - 1, rgb_to_sf_color(fill_color, fill_alpha),
+          curve_color) {}
 
   ~Visualizer() {
     fftwf_destroy_plan(this->plan);
@@ -404,8 +408,9 @@ void compute(ShortTimeSpectrum &self, std::mutex &compute_draw_mutex,
 void draw(ShortTimeSpectrum &self, std::mutex &compute_draw_mutex,
     Buffer const &buffer, sf::RenderTarget &target, ViewTransform const &vt,
     sf::Vector2f const &view_scale) {
-  auto render_target_box{get_render_target_box(target)};
-  auto plot_to_frame_box{
+  auto const render_target_box{get_render_target_box(target)};
+  auto const frame_box{get_frame_box(self.pa, render_target_box, view_scale)};
+  auto const plot_to_frame_box{
     get_plot_to_frame_box(self, render_target_box, view_scale)};
   auto s{iterative_set_init(self.graph,
     {self.curve_thickness * .5f, self.curve_thickness * .5f})};
@@ -416,8 +421,9 @@ void draw(ShortTimeSpectrum &self, std::mutex &compute_draw_mutex,
         {0.f, static_cast<float>(self.n_out() - 2)},
         {self.f_min(buffer), self.f_max(buffer)}))};
       std::array<float, 2> const p{i_l2Hz, self.aggregate[i]};
+      sf::Vector2f const p_v{array_to_sf_vec(lerp(p, plot_to_frame_box))};
       s = iterative_set_point(self.graph, s, vt,
-        array_to_sf_vec(lerp(p, plot_to_frame_box)), {});
+        p_v, {p_v.x, frame_box.y0}, {});
     }
   }
   draw_underlay(self, target, vt, view_scale);
@@ -631,7 +637,8 @@ int main_client_visualizer(args::args_t::const_iterator &pos,
       std::round(buffer.sample_rate() * fft_duration))};
     auto const window_function{[](std::size_t const i, std::size_t const n){
       return dsp::window<float, dsp::WindowShape::blackman>(i, n, .16f); }};
-    RGB8 const curve_color{0x55, 0x77, 0xff};
+    RGB8 const curve_color{0xff, 0xff, 0xff};
+    sf::Color const fill_color{0xff, 0x00, 0x00, 0x7f};
     float const x_min{.5f}, x_max{80.f}, y_min_dB{-24.f}, y_max_dB{24.f};
     default_plot_box = {dsp::to_l2Hz(x_min), y_min_dB,
                         dsp::to_l2Hz(x_max), y_max_dB};
@@ -697,7 +704,8 @@ int main_client_visualizer(args::args_t::const_iterator &pos,
           font};
 
     return ShortTimeSpectrum(n_in, window_function, default_plot_box,
-      curve_color, gui_scale * curve_thickness, pa);
+      sf_color_to_rgb(fill_color), fill_color.a, curve_color,
+      gui_scale * curve_thickness, pa);
   } else {
     return Visualizer<mode_visualizer>{};
   }}()};

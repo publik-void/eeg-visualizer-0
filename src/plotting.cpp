@@ -140,10 +140,13 @@ sf::Vertex * GraphBase::end() {
   return &(this->vertexes[vertexes.getVertexCount() - 1]) + 1;
 }
 
-GraphBase::GraphBase(sf::VertexArray const vertexes) : vertexes{vertexes} {}
+GraphBase::GraphBase(sf::VertexArray const vertexes) : GraphInterface{},
+    vertexes{vertexes} {}
 
 GraphBase::GraphBase(sf::PrimitiveType const primitive,
-    std::size_t const n_vertexes, sf::Color const &init_color) : vertexes{[&](){
+    std::size_t const n_vertexes, sf::Color const &init_color) :
+    GraphInterface{},
+    vertexes{[&](){
       sf::VertexArray vertexes(primitive, n_vertexes);
       for (std::size_t i{0}; i < vertexes.getVertexCount(); ++i)
         vertexes[i].color = init_color;
@@ -203,6 +206,19 @@ Fill::Graph(std::size_t const n, sf::Color const &init_color) :
 
 void set_n(Fill &self, std::size_t const n) {
   return set_n(self.vertexes, n * 2);
+}
+
+FillCurve::FillCurve(std::size_t const n, sf::Color const &c_fill,
+    RGB8 const &c_curve) : fill(n, c_fill), curve(n, c_curve) {}
+
+void set_n(FillCurve &self, std::size_t const n) {
+  set_n(self.fill, n);
+  set_n(self.curve, n);
+}
+
+void draw(sf::RenderTarget &target, FillCurve const &fill_curve) {
+  draw(target, fill_curve.fill);
+  draw(target, fill_curve.curve);
 }
 
 sf::Uint32 PlotAnnotations::mode_to_sf_text_style(mode_t const mode) {

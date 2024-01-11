@@ -88,7 +88,12 @@ inline sf::Vertex * set_vertex(sf::Vertex * const vertex,
 void set_n(sf::VertexArray &, std::size_t const);
 void set_primitive_type(sf::VertexArray &, sf::PrimitiveType const);
 
-struct GraphBase {
+// NOTE: Subclasses of this are meant to have a unified interface of free
+// functions. However, as long as it is not abstract, the value of using
+// inheritance like this is probably questionable.
+struct GraphInterface {};
+
+struct GraphBase : public GraphInterface {
   sf::VertexArray vertexes;
   using state_t = sf::Vertex *;
 
@@ -207,7 +212,7 @@ struct Graph<args::get_mode_index(modes_graph, "curve")> : public GraphBase {
 
   std::size_t n() const;
 
-  Graph(std::size_t const n = 1, RGB8 const & = {});
+  Graph(std::size_t const = 1, RGB8 const & = {});
 };
 
 using Curve = Graph<args::get_mode_index(modes_graph, "curve")>;
@@ -308,6 +313,42 @@ inline Fill::state_t iterative_set_point(Fill &self, Fill::state_t const &s,
     std::optional<float> const &a_v = {},
     std::optional<float> const &a_f = {}) {
   return set_point(self, s, vt, p_v, p_f, rgb_v, rgb_f, a_v, a_f);
+}
+
+struct FillCurve : public GraphInterface {
+  struct state_t {
+    Fill::state_t s_fill;
+    Curve::state_t s_curve;
+  };
+
+  Fill fill;
+  Curve curve;
+
+  FillCurve(std::size_t const = 1, sf::Color const & = {}, RGB8 const & = {});
+};
+
+void set_n(FillCurve &, std::size_t const);
+
+void draw(sf::RenderTarget &, FillCurve const &);
+
+inline FillCurve::state_t iterative_set_init(FillCurve &self,
+    sf::Vector2f const r_init = {}, std::optional<RGB8> const c_init = {}) {
+  return {iterative_set_init(self.fill),
+    iterative_set_init(self.curve, r_init, c_init)};
+}
+
+inline FillCurve::state_t iterative_set_point(FillCurve &self,
+    FillCurve::state_t const &s, ViewTransform const &vt,
+    sf::Vector2f const &p_v, sf::Vector2f const &p_f = {},
+    std::optional<RGB8> const &rgb_v = {},
+    std::optional<RGB8> const &rgb_f = {},
+    std::optional<float> const &a_v = {},
+    std::optional<float> const &a_f = {},
+    std::optional<sf::Vector2f> const &r = {},
+    std::optional<RGB8> const &rgb_c = {}) {
+  return {iterative_set_point(self.fill, s.s_fill, vt, p_v, p_f, rgb_v, rgb_f,
+      a_v, a_f),
+    iterative_set_point(self.curve, s.s_curve, vt, p_v, r, rgb_c)};
 }
 
 struct PlotAnnotations {
