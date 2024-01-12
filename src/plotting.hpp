@@ -8,6 +8,8 @@
 #include <vector>
 #include <string>
 
+#include <iostream>
+
 #include "SFML/Graphics.hpp"
 
 #include "args.hpp"
@@ -270,9 +272,19 @@ inline Curve::state_t iterative_set_point(Curve &self, Curve::state_t const &s,
 
 template<>
 struct Graph<args::get_mode_index(modes_graph, "fill")> : public GraphBase {
+  struct state_t {
+    sf::Vertex * point;
+    std::optional<sf::Vector2f> p_v;
+    std::optional<sf::Vector2f> p_f;
+    std::optional<RGB8> rgb_v;
+    std::optional<RGB8> rgb_f;
+    std::optional<std::uint8_t> a_v;
+    std::optional<std::uint8_t> a_f;
+  };
+
   std::size_t n() const;
 
-  Graph(std::size_t const = 0, sf::Color const & = {});
+  Graph(std::size_t const = 1, sf::Color const & = {});
 };
 
 using Fill = Graph<args::get_mode_index(modes_graph, "fill")>;
@@ -280,18 +292,104 @@ using Fill = Graph<args::get_mode_index(modes_graph, "fill")>;
 void set_n(Fill &, std::size_t const);
 
 inline sf::Vertex * get_point(Fill &self, std::size_t const i = 0) {
-  return &(self.vertexes[i * 2]);
+  return &(self.vertexes[i * 6]);
 }
 
 inline sf::Vertex * prev_point(Fill const &, sf::Vertex * const point) {
-  return point - 2;
+  return point - 6;
 }
 
 inline sf::Vertex * next_point(Fill const &, sf::Vertex * const point) {
-  return point + 2;
+  return point + 6;
 }
 
-inline sf::Vertex * set_point(Fill &, sf::Vertex * const point,
+inline sf::Vertex * set_point(Fill &self, sf::Vertex * const point,
+    ViewTransform const &vt,
+    std::optional<sf::Vector2f> const &p_v0,
+    std::optional<sf::Vector2f> const &p_f0,
+    std::optional<sf::Vector2f> const &p_v1 = {},
+    std::optional<sf::Vector2f> const &p_f1 = {},
+    std::optional<RGB8> const &rgb_v0 = {},
+    std::optional<RGB8> const &rgb_f0 = {},
+    std::optional<RGB8> const &rgb_v1 = {},
+    std::optional<RGB8> const &rgb_f1 = {},
+    std::optional<std::uint8_t> const &a_v0 = {},
+    std::optional<std::uint8_t> const &a_f0 = {},
+    std::optional<std::uint8_t> const &a_v1 = {},
+    std::optional<std::uint8_t> const &a_f1 = {}) {
+  auto const ab{[](sf::Vector2f const &p0, sf::Vector2f const &p1){
+      float const a{(p0.y - p1.y) / (p0.x - p1.x)},
+        b{p0.y - p0.x * a};
+      return std::make_pair(a, b);
+    }};
+  auto const sorted{[](float const x0, float const x1){
+      if (x0 <= x1) return std::make_pair(x0, x1);
+      else return std::make_pair(x1, x0);
+    }};
+
+  auto vertex{point};
+  bool intersects{false};
+
+  sf::Vector2f const
+    vtp_f0{vt(p_f0).value_or((vertex + 0)->position)},
+    vtp_v0{vt(p_v0).value_or((vertex + 1)->position)},
+    vtp_f1{vt(p_f1).value_or((vertex + 4)->position)},
+    vtp_v1{vt(p_v1).value_or((vertex + 5)->position)};
+
+  RGB const
+    _rgb_f0{rgb_f0.value_or(sf_color_to_rgb((vertex + 0)->color))},
+    _rgb_v0{rgb_v0.value_or(sf_color_to_rgb((vertex + 1)->color))},
+    _rgb_f1{rgb_f1.value_or(sf_color_to_rgb((vertex + 4)->color))};
+
+  std::uint8_t const
+    _a_f0{a_f0.value_or(((vertex + 0)->color).a)},
+    _a_v0{a_v0.value_or(((vertex + 1)->color).a)},
+    _a_f1{a_f1.value_or(((vertex + 4)->color).a)};
+
+  if (vertex >= self.begin()) {
+    auto const &[a_f, b_f]{ab(vtp_f0, vtp_f1)};
+    auto const &[a_v, b_v]{ab(vtp_v0, vtp_v1)};
+    float const x_intersect{(b_v - b_f) / (a_f - a_v)};
+    auto const &[x0_f, x1_f]{sorted(vtp_f0.x, vtp_f1.x)};
+    auto const &[x0_v, x1_v]{sorted(vtp_v0.x, vtp_v1.x)};
+    // TODO: This doesn't catch intersections where one line is vertical.
+    if (vtp_f0.x != vtp_f1.x and vtp_v0.x != vtp_v1.x and a_f != a_v and
+        x_intersect > x0_f and x_intersect > x0_v and
+        x_intersect < x1_f and x_intersect < x1_v) {
+      intersects = true;
+      float const y_intersect{a_f * x_intersect + b_f};
+      sf::Vector2f const vtp_intersect{x_intersect, y_intersect};
+      // TODO: An interpolated color would have to be computed for the
+      // intersection point here to be perfectly correctly colored.
+      vertex = set_vertex(vertex, vtp_f0, rgb_f0, a_f0);
+      vertex = set_vertex(vertex, vtp_v0, rgb_v0, a_v0);
+      vertex = set_vertex(vertex, vtp_intersect, _rgb_f0, _a_f0);
+      vertex = set_vertex(vertex, vtp_intersect, _rgb_f1, _a_f1);
+      vertex = set_vertex(vertex, vtp_f1, rgb_f1, a_f1);
+      vertex = set_vertex(vertex, vtp_v1, rgb_v1, a_v1);
+    }
+  }
+  if (not intersects) {
+    vertex = set_vertex(vertex, vtp_f0, rgb_f0, a_f0);
+    vertex = set_vertex(vertex, vtp_v0, rgb_v0, a_v0);
+    vertex = set_vertex(vertex, vtp_f1, _rgb_f1, _a_f1);
+    vertex = set_vertex(vertex, vtp_v0, _rgb_v0, _a_v0);
+    vertex = set_vertex(vertex, vtp_f1, rgb_f1, a_f1);
+    vertex = set_vertex(vertex, vtp_v1, rgb_v1, a_v1);
+  }
+  return vertex;
+}
+
+inline Fill::state_t iterative_set_init(Fill &self,
+    std::optional<RGB8> const rgb_v_init = {},
+    std::optional<RGB8> const rgb_f_init = {},
+    std::optional<std::uint8_t> const a_v_init = {},
+    std::optional<std::uint8_t> const a_f_init = {}) {
+  return {prev_point(self, get_point(self)), {}, {},
+    rgb_v_init, rgb_f_init, a_v_init, a_f_init};
+}
+
+inline Fill::state_t iterative_set_point(Fill &self, Fill::state_t const &s,
     ViewTransform const &vt,
     std::optional<sf::Vector2f> const &p_v = {},
     std::optional<sf::Vector2f> const &p_f = {},
@@ -299,20 +397,11 @@ inline sf::Vertex * set_point(Fill &, sf::Vertex * const point,
     std::optional<RGB8> const &rgb_f = {},
     std::optional<float> const &a_v = {},
     std::optional<float> const &a_f = {}) {
-  auto vertex{point};
-  vertex = set_vertex(vertex, vt(p_f), rgb_f, a_f);
-  vertex = set_vertex(vertex, vt(p_v), rgb_v, a_v);
-  return vertex;
-}
-
-inline Fill::state_t iterative_set_point(Fill &self, Fill::state_t const &s,
-    ViewTransform const &vt,
-    sf::Vector2f const &p_v, std::optional<sf::Vector2f> const &p_f = {},
-    std::optional<RGB8> const &rgb_v = {},
-    std::optional<RGB8> const &rgb_f = {},
-    std::optional<float> const &a_v = {},
-    std::optional<float> const &a_f = {}) {
-  return set_point(self, s, vt, p_v, p_f, rgb_v, rgb_f, a_v, a_f);
+  sf::Vertex * const next{s.point >= get_point(self)
+    ? set_point(self, s.point, vt, s.p_v, s.p_f, p_v, p_f, s.rgb_v, s.rgb_f,
+        rgb_v, rgb_f, s.a_v, s.a_f, a_v, a_f)
+    : next_point(self, s.point)};
+  return {next, p_v, p_f, rgb_v, rgb_f, a_v, a_f};
 }
 
 struct FillCurve : public GraphInterface {
@@ -332,8 +421,13 @@ void set_n(FillCurve &, std::size_t const);
 void draw(sf::RenderTarget &, FillCurve const &);
 
 inline FillCurve::state_t iterative_set_init(FillCurve &self,
+    std::optional<RGB8> const rgb_v_init = {},
+    std::optional<RGB8> const rgb_f_init = {},
+    std::optional<std::uint8_t> const a_v_init = {},
+    std::optional<std::uint8_t> const a_f_init = {},
     sf::Vector2f const r_init = {}, std::optional<RGB8> const c_init = {}) {
-  return {iterative_set_init(self.fill),
+  return {
+    iterative_set_init(self.fill, rgb_v_init, rgb_f_init, a_v_init, a_f_init),
     iterative_set_init(self.curve, r_init, c_init)};
 }
 

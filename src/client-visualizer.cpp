@@ -412,7 +412,7 @@ void draw(ShortTimeSpectrum &self, std::mutex &compute_draw_mutex,
   auto const frame_box{get_frame_box(self.pa, render_target_box, view_scale)};
   auto const plot_to_frame_box{
     get_plot_to_frame_box(self, render_target_box, view_scale)};
-  auto s{iterative_set_init(self.graph,
+  auto s{iterative_set_init(self.graph, {}, {}, {}, {},
     {self.curve_thickness * .5f, self.curve_thickness * .5f})};
   {
     std::scoped_lock lock{compute_draw_mutex};
@@ -423,7 +423,7 @@ void draw(ShortTimeSpectrum &self, std::mutex &compute_draw_mutex,
       std::array<float, 2> const p{i_l2Hz, self.aggregate[i]};
       sf::Vector2f const p_v{array_to_sf_vec(lerp(p, plot_to_frame_box))};
       s = iterative_set_point(self.graph, s, vt,
-        p_v, {{p_v.x, frame_box.y0}}, {});
+        p_v, {{p_v.x, .5f * (frame_box.y0 + frame_box.y1)}}, {});
     }
   }
   draw_underlay(self, target, vt, view_scale);

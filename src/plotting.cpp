@@ -198,14 +198,14 @@ void set_n(Curve &self, std::size_t const n) {
 }
 
 std::size_t Fill::n() const {
-  return this->vertexes.getVertexCount() / 2;
+  return this->vertexes.getVertexCount() / 6;
 }
 
 Fill::Graph(std::size_t const n, sf::Color const &init_color) :
-    GraphBase(sf::PrimitiveType::TriangleStrip, n * 2, init_color) {}
+    GraphBase(sf::PrimitiveType::Triangles, n * 6, init_color) {}
 
 void set_n(Fill &self, std::size_t const n) {
-  return set_n(self.vertexes, n * 2);
+  return set_n(self.vertexes, n * 6);
 }
 
 FillCurve::FillCurve(std::size_t const n, sf::Color const &c_fill,
