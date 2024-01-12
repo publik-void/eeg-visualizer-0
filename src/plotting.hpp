@@ -93,7 +93,9 @@ void set_primitive_type(sf::VertexArray &, sf::PrimitiveType const);
 // NOTE: Subclasses of this are meant to have a unified interface of free
 // functions. However, as long as it is not abstract, the value of using
 // inheritance like this is probably questionable.
-struct GraphInterface {};
+struct GraphInterface {
+  std::size_t n() const;
+};
 
 struct GraphBase : public GraphInterface {
   sf::VertexArray vertexes;
@@ -409,6 +411,8 @@ struct FillCurve : public GraphInterface {
     Fill::state_t s_fill;
     Curve::state_t s_curve;
   };
+
+  std::size_t n() const;
 
   Fill fill;
   Curve curve;

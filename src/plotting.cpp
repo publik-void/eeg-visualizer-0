@@ -211,6 +211,10 @@ void set_n(Fill &self, std::size_t const n) {
 FillCurve::FillCurve(std::size_t const n, sf::Color const &c_fill,
     RGB8 const &c_curve) : fill(n, c_fill), curve(n, c_curve) {}
 
+std::size_t FillCurve::n() const {
+  return this->fill.n();
+}
+
 void set_n(FillCurve &self, std::size_t const n) {
   set_n(self.fill, n);
   set_n(self.curve, n);

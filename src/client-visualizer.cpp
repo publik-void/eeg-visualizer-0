@@ -273,32 +273,34 @@ void draw(Visualizer<mode> &, std::mutex &, Buffer const &, sf::RenderTarget &,
     ViewTransform const &, sf::Vector2f const &) {}
 
 template<>
-struct Visualizer<args::get_mode_index(modes_visualizer, "time-series")> {
+struct Visualizer<args::get_mode_index(modes_visualizer, "time-series")> :
+    public VisualizerSingle2DFrameBase  {
   // Parameters
   float y_scale;
   bool scrolling;
+  float curve_thickness;
 
   // State
-  std::vector<sf::VertexArray> vertexess;
+  std::vector<FillCurve> graphs;
 
   std::size_t n_timepoints() const {
-    return this->vertexess.front().getVertexCount();
+    return this->graphs.front().n();
   }
 
   std::size_t n_channels() const {
-    return this->vertexess.size();
+    return this->graphs.size();
   }
 
   Visualizer(std::size_t const n_channels, std::size_t const n_timepoints,
-      sf::Color const &color, float const y_scale,
-      bool const scrolling = true) :
-      y_scale{y_scale}, scrolling{scrolling},
-      vertexess{std::vector<sf::VertexArray>(n_channels,
-        sf::VertexArray(sf::LineStrip, n_timepoints))} {
-    for (auto &vertexes : this->vertexess)
-      for (std::size_t i{0}; i < n_timepoints; ++i)
-        vertexes[i].color = color;
-  }
+      Box<float> const &plot_box, RGB8 const &fill_color,
+      std::uint8_t const &fill_alpha, RGB8 const &curve_color,
+      float const y_scale, bool const scrolling,
+      float const curve_thickness, PlotAnnotations const &pa) :
+      VisualizerSingle2DFrameBase{plot_box, pa, {}},
+      y_scale{y_scale}, scrolling{scrolling}, curve_thickness{curve_thickness},
+      graphs(n_channels,
+        FillCurve(n_timepoints, rgb_to_sf_color(fill_color, fill_alpha),
+          curve_color)) {}
 };
 
 using TimeSeries =
@@ -307,25 +309,41 @@ using TimeSeries =
 void draw(TimeSeries &self, std::mutex &compute_draw_mutex,
     Buffer const &buffer, sf::RenderTarget &target, ViewTransform const &vt,
     sf::Vector2f const &view_scale) {
-  std::size_t const n_timepoints{
-    std::min(self.n_timepoints(), buffer.n_timepoints)};
-  std::size_t const n_channels{
-    std::min(self.n_channels(), buffer.n_channels())};
-  for (std::size_t i{0}; i < n_timepoints; ++i)
-    for (std::size_t j{0}; j < n_channels; ++j) {
-      float const s{self.scrolling
-        ? buffer[{j, n_timepoints - 1 - i}]
-        : buffer.data[i * n_channels + j]};
-      float const x{i / static_cast<float>(n_timepoints - 1)};
-      float const y{(s * (.5f * self.y_scale) + j + .5f) / n_channels};
-      self.vertexess[j][i].position = sf::Vector2f{x, y};
+  std::size_t const n_timepoints{self.n_timepoints()},
+    _n_timepoints{std::min(n_timepoints, buffer.n_timepoints)},
+    _n_channels{std::min(self.n_channels(), buffer.n_channels())};
+  auto const render_target_box{get_render_target_box(target)};
+  auto const plot_to_frame_box{
+    get_plot_to_frame_box(self, render_target_box, view_scale)};
+
+  {
+    std::scoped_lock lock{compute_draw_mutex};
+    for (std::size_t j{0}; j < _n_channels; ++j) {
+      auto s{iterative_set_init(self.graphs[j], {}, {}, {}, {},
+        {self.curve_thickness * .5f, self.curve_thickness * .5f})};
+      for (std::size_t i{0}; i < _n_timepoints; ++i) {
+        float const datum{self.scrolling
+          ? buffer[{j, _n_timepoints - 1 - i}]
+          : buffer.data[i * _n_channels + j]};
+        std::array<float, 2> const p_f{(i + n_timepoints - _n_timepoints) /
+              static_cast<float>(n_timepoints - 1),
+            ((_n_channels - j) - .5f)},
+          p_v{std::get<0>(p_f),
+            datum * .5f * self.y_scale + std::get<1>(p_f)};
+        s = iterative_set_point(self.graphs[j], s, vt,
+          array_to_sf_vec(lerp(p_v, plot_to_frame_box)),
+          {array_to_sf_vec(lerp(p_f, plot_to_frame_box))});
+      }
     }
-  for (auto const &vertexes : self.vertexess) target.draw(vertexes);
+  }
+  draw_underlay(self, target, vt, view_scale);
+  for (auto const &graph : self.graphs) draw(target, graph);
+  draw_overlay(self, target, vt, view_scale);
 }
 
 template<>
 struct Visualizer<
-      args::get_mode_index(modes_visualizer, "short-time-spectrum")> : 
+      args::get_mode_index(modes_visualizer, "short-time-spectrum")> :
     public VisualizerSingle2DFrameBase {
   // Parameters
   std::size_t n_in;
@@ -422,8 +440,7 @@ void draw(ShortTimeSpectrum &self, std::mutex &compute_draw_mutex,
         {self.f_min(buffer), self.f_max(buffer)}))};
       std::array<float, 2> const p{i_l2Hz, self.aggregate[i]};
       sf::Vector2f const p_v{array_to_sf_vec(lerp(p, plot_to_frame_box))};
-      s = iterative_set_point(self.graph, s, vt,
-        p_v, {{p_v.x, .5f * (frame_box.y0 + frame_box.y1)}}, {});
+      s = iterative_set_point(self.graph, s, vt, p_v, {{p_v.x, frame_box.y0}});
     }
   }
   draw_underlay(self, target, vt, view_scale);
@@ -623,12 +640,103 @@ int main_client_visualizer(args::args_t::const_iterator &pos,
   Visualizer<mode_visualizer> visualizer{[&](){
   if constexpr (mode_visualizer ==
       args::get_mode_index(modes_visualizer, "time-series")) {
-    std::size_t const n_timepoints{buffer.n_timepoints};
-    sf::Color const color{0xff, 0xff, 0xff, 0xff};
-    float const y_scale{1.f};
+    std::size_t const n_timepoints{buffer.n_timepoints},
+      n_channels{buffer.n_channels()};
+    RGB8 const curve_color{0xff, 0xff, 0xff};
+    sf::Color const fill_color{0xff, 0x00, 0x00, 0x7f};
+    float const y_scale{.75f};
     bool const scrolling{true};
-    return TimeSeries(
-      buffer.n_channels(), n_timepoints, color, y_scale, scrolling);
+    float const curve_thickness{4.f};
+    float const duration(n_timepoints / buffer.sample_rate());
+    float const top_and_bottom_space_factor{1.05f};
+    float const t_min{-duration}, t_max{0.f},
+      y_max{n_channels * top_and_bottom_space_factor},
+      y_min{n_channels - y_max};
+    auto const t_to_x{[=](float const t){ return ilerp(t, {t_min, t_max}); }};
+    auto const sample_to_x{[=](float const sample){
+      return t_to_x(lerp(sample, {n_timepoints - 1.f, 0.f}, {-duration, 0.f}));
+    }};
+    default_plot_box = {t_to_x(t_min), y_min, t_to_x(t_max), y_max};
+
+    for (float tick{std::floor(t_min)}; tick <= std::ceil(t_max); tick += 1.f) {
+      majors.x0.push_back(
+        PlotAnnotations::major_t{t_to_x(tick), {fancy(tick)}});
+      std::size_t const n_divs{4u}; float const div{1.f / n_divs};
+      for (std::size_t i{1u}; i < n_divs; ++i)
+        minors.x0.push_back(t_to_x(tick + i * div));
+    }
+    std::size_t const sample_ticks_spacing_minor{32u},
+      sample_ticks_spacing_major{std::max(static_cast<std::size_t>(
+          std::exp2(std::floor(std::log2(std::max(8. * (n_timepoints /
+            static_cast<double>(sample_ticks_spacing_minor)), 1.))))),
+        sample_ticks_spacing_minor)};
+    for (std::size_t i{0u}; i < n_timepoints; i += sample_ticks_spacing_major) {
+      majors.x1.push_back(
+        PlotAnnotations::major_t{sample_to_x(i), {fancy(i)}});
+      for (std::size_t j{i + sample_ticks_spacing_minor};
+          j < i + sample_ticks_spacing_major;
+          j += sample_ticks_spacing_minor) {
+        minors.x1.push_back(sample_to_x(j));
+      }
+    }
+    for (std::size_t i_channel{0u}; i_channel < n_channels; ++i_channel) {
+      float const level{n_channels - i_channel - .5f};
+      majors.y1.push_back(PlotAnnotations::major_t{level, {fancy(i_channel)}});
+      for (float const y : {-1.f, 0.f, 1.f}) {
+        majors.y0.push_back(
+          PlotAnnotations::major_t{level + y * .5f * y_scale, {fancy(y)}});
+        std::size_t const n_divs{4u}; float const div{1.f / n_divs};
+        if (y != 1.f) for (std::size_t j{1u}; j < n_divs; ++j)
+          minors.y0.push_back(level + (y + j * div) * .5f * y_scale);
+      }
+    }
+
+    PlotAnnotations const pa{
+          {}, {},
+          {{"Time [s]"}, {"Signals"}, {"Time [samples]"}, {"Channel"}},
+          {PlotAnnotations::on,
+            PlotAnnotations::on | PlotAnnotations::vertical,
+            PlotAnnotations::on,
+            PlotAnnotations::on | PlotAnnotations::vertical},
+          {PlotAnnotations::on,
+            PlotAnnotations::on,
+            PlotAnnotations::on,
+            PlotAnnotations::on},
+          {PlotAnnotations::on,
+            PlotAnnotations::on,
+            PlotAnnotations::off,
+            PlotAnnotations::off},
+          {PlotAnnotations::on,
+            PlotAnnotations::on,
+            PlotAnnotations::off,
+            PlotAnnotations::off},
+          {PlotAnnotations::on | PlotAnnotations::italic,
+            PlotAnnotations::on | PlotAnnotations::italic | PlotAnnotations::vertical,
+            PlotAnnotations::on | PlotAnnotations::italic,
+            PlotAnnotations::on | PlotAnnotations::italic | PlotAnnotations::vertical},
+          {0x7f, 0x7f, 0x7f}, 0xff,
+          {0xff, 0xff, 0xff}, 0x37,
+          {0xff, 0xff, 0xff}, 0x15,
+          {0x7f, 0x7f, 0x7f}, 0xff,
+          {0x7f, 0x7f, 0x7f}, 0xff,
+          {0x00, 0x00, 0x00}, 0xcc,
+          gui_scale * 7.f,
+          gui_scale * 3.5f,
+          gui_scale * 3.f,
+          gui_scale * 2.f,
+          gui_scale * 2.f,
+          gui_scale * 30.f,
+          gui_scale * 25.f,
+          gui_scale * 10.f,
+          gui_scale * 10.f,
+          gui_scale * 10.f,
+          gui_scale * 4096.f,
+          font};
+
+
+    return TimeSeries(n_channels, n_timepoints, default_plot_box,
+      sf_color_to_rgb(fill_color), fill_color.a, curve_color,
+      y_scale, scrolling, gui_scale * curve_thickness, pa);
   } else if constexpr (mode_visualizer ==
       args::get_mode_index(modes_visualizer, "short-time-spectrum")) {
     double const fft_duration{args::parse_opt(
@@ -640,8 +748,8 @@ int main_client_visualizer(args::args_t::const_iterator &pos,
     RGB8 const curve_color{0xff, 0xff, 0xff};
     sf::Color const fill_color{0xff, 0x00, 0x00, 0x7f};
     float const x_min{.5f}, x_max{80.f}, y_min_dB{-24.f}, y_max_dB{24.f};
-    default_plot_box = {dsp::to_l2Hz(x_min), y_min_dB,
-                        dsp::to_l2Hz(x_max), y_max_dB};
+    default_plot_box = {
+      dsp::to_l2Hz(x_min), y_min_dB, dsp::to_l2Hz(x_max), y_max_dB};
     for (float const tick : {.2f, .3f, .4f, .5f, .6f, .7f, .8f, .9f, 2.f, 3.f,
         4.f, 5.f, 6.f, 7.f, 8.f, 9.f, 20.f, 30.f, 40.f, 50.f, 60.f, 70.f, 80.f,
         90.f})
