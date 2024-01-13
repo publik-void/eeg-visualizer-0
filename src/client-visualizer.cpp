@@ -586,6 +586,8 @@ int main_client_visualizer(args::args_t::const_iterator &pos,
     0, // stencil bits
     args::parse_opt(args::parse_unsigned_int,
       opts_visualizer["antialiasing-level"]),
+    4, // OpenGL version major number
+    3, // OpenGL version minor number
   };
   unsigned int const frame_rate_limit{args::parse_opt(
     args::parse_unsigned_int, opts_visualizer["frame-rate-limit"])};
@@ -605,7 +607,8 @@ int main_client_visualizer(args::args_t::const_iterator &pos,
   sf::Color const background_color{0x00, 0x00, 0x00};
 
   auto const font{std::make_shared<sf::Font>()};
-  font->loadFromFile("/System/Library/Fonts/Helvetica.ttc");
+  //font->loadFromFile("/System/Library/Fonts/Helvetica.ttc");
+  font->loadFromFile("/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf");
   //font->setSmooth(true);
 
   auto const mouse_button_mod_switch{sf::Mouse::Right};
@@ -750,11 +753,13 @@ int main_client_visualizer(args::args_t::const_iterator &pos,
     float const x_min{.5f}, x_max{80.f}, y_min_dB{-24.f}, y_max_dB{24.f};
     default_plot_box = {
       dsp::to_l2Hz(x_min), y_min_dB, dsp::to_l2Hz(x_max), y_max_dB};
-    for (float const tick : {.2f, .3f, .4f, .5f, .6f, .7f, .8f, .9f, 2.f, 3.f,
-        4.f, 5.f, 6.f, 7.f, 8.f, 9.f, 20.f, 30.f, 40.f, 50.f, 60.f, 70.f, 80.f,
-        90.f})
+    for (float const tick : {
+          .2f, .3f, .4f, .5f, .6f, .7f, .8f, .9f,
+          2.f, 3.f, 4.f, 5.f, 6.f, 7.f, 8.f, 9.f,
+          20.f, 30.f, 40.f, 50.f, 60.f, 70.f, 80.f, 90.f,
+          200.f, 300.f, 400.f, 500.f, 600.f, 700.f, 800.f, 900.f})
       minors.x0.push_back(dsp::to_l2Hz(tick));
-    for (float const tick : {.1f, 1.f, 10.f, 100.f})
+    for (float const tick : {.1f, 1.f, 10.f, 100.f, 1000.f})
       majors.x0.push_back(
         PlotAnnotations::major_t{dsp::to_l2Hz(tick), {fancy(tick)}});
     for (float const tick : {-21.f, -18.f, -15.f, -9.f, -6.f, -3.f, 3.f, 6.f,
