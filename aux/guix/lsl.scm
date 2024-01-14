@@ -1,7 +1,8 @@
 ;; TODO: There is not much missing for this to be submitted as a patch to Guix
 ;; See `https://guix.gnu.org/manual/en/html_node/Submitting-Patches.html`
 
-(define-module (gnu packages lsl)
+;;(define-module (gnu packages lsl)
+(define-module (lsl)
   #:use-module (guix packages)
   #:use-module (guix git-download)
   #:use-module (guix build-system cmake)

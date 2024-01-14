@@ -72,3 +72,4 @@ add_executable(eeg-visualizer src/main.cpp)
 target_link_libraries(eeg-visualizer PUBLIC signal-handling args dsp
   server-dummy client-visualizer Threads::Threads)
 
+install(TARGETS eeg-visualizer DESTINATION bin)
