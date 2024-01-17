@@ -586,8 +586,8 @@ int main_client_visualizer(args::args_t::const_iterator &pos,
     0, // stencil bits
     args::parse_opt(args::parse_unsigned_int,
       opts_visualizer["antialiasing-level"]),
-    4, // OpenGL version major number
-    3, // OpenGL version minor number
+    2, // OpenGL version major number
+    1, // OpenGL version minor number
   };
   unsigned int const frame_rate_limit{args::parse_opt(
     args::parse_unsigned_int, opts_visualizer["frame-rate-limit"])};
