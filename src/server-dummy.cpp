@@ -10,17 +10,38 @@
 #include "args.hpp"
 #include "lsl-customized.hpp"
 
+args::desc_t constexpr desc_dummy{
+  "Send random data."};
+
+args::flag_descs_t const flag_descs{
+  {"print-data", "Print generated data to stdout."}};
+
+args::opt_descs_t const opt_descs{
+  {"sample-rate", {"f", "1000", "Generate data at a sampling frequency of <f> "
+    "Hz.", {}}},
+  {"amplitude", {"a", "1", "Scale the generated data by <a>.", {}}},
+  {"dc-offset", {"b", "0", "Add <b> to the generated data.", {}}}};
+
+int print_usage(args::arg_t const &program_name,
+    args::UsageMessageMode const mode) {
+  return args::print_usage(program_name, {"server", "dummy"}, desc_dummy,
+    nullptr, nullptr, nullptr, nullptr, flag_descs, opt_descs, {}, mode);
+}
+
 int main_server_dummy(args::args_t::const_iterator &pos,
     args::args_t::const_iterator const &end, args::arg_t const &program_name) {
-  args::flags_t flags{{"print-data", false}};
-  args::opts_t opts{{"sample-rate", {}}};
+  auto flags{args::init_flags(flag_descs)};
+  auto opts{args::init_opts(opt_descs)};
   args::parse_opts_and_flags(flags, opts, pos, end);
+  if (flags["help"] or pos != end) return print_usage(
+    program_name, flags["help"] ? args::UsageMessageMode::help :
+      args::UsageMessageMode::error);
 
   std::string const name{"lsl-server-dummy"}, type{"EEG"},
     source_id{"lsl-server-dummy-id"};
   lsl::channel_format_t channel_format = lsl::cf_float32;
   double sample_rate{
-    args::parse_opt(args::parse_double, opts["sample-rate"], 1000.)};
+    args::parse_last_optval(args::parse_double, opts, "sample-rate")};
   std::int32_t const n_channels = 8;
 
   lsl::stream_info info{name, type, n_channels, sample_rate, channel_format,
@@ -42,8 +63,10 @@ int main_server_dummy(args::args_t::const_iterator &pos,
   std::random_device rd;
   std::mt19937 rng{rd()};
   std::uniform_real_distribution dist{-1.f, 1.f};
-  float amplitude{.2f};
-  float dc_offset{2.f};
+  float amplitude{
+    args::parse_last_optval(args::parse_float, opts, "amplitude")};
+  float dc_offset{
+    args::parse_last_optval(args::parse_float, opts, "dc-offset")};
 
   auto const sampling_interval{
     std::chrono::duration_cast<std::chrono::high_resolution_clock::duration>(

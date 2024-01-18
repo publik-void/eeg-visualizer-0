@@ -29,7 +29,7 @@ int print_usage_main(args::arg_t const &program_name,
   return args::print_usage(program_name, {}, desc_main,
     std::next(std::cbegin(modes_main)), std::cend(modes_main),
     std::next(std::cbegin(modes_descs_main)),
-    std::cend(modes_descs_main), {}, {}, mode);
+    std::cend(modes_descs_main), {}, {}, {}, mode);
 }
 
 int print_usage_server(args::arg_t const &program_name,
@@ -37,7 +37,7 @@ int print_usage_server(args::arg_t const &program_name,
   return args::print_usage(program_name, {"server"}, desc_server,
     std::next(std::cbegin(modes_server)), std::cend(modes_server),
     std::next(std::cbegin(modes_descs_server)), std::cend(modes_descs_server),
-    {}, {}, mode);
+    {}, {}, {}, mode);
 }
 
 int print_usage_client(args::arg_t const &program_name,
@@ -45,7 +45,7 @@ int print_usage_client(args::arg_t const &program_name,
   return args::print_usage(program_name, {"client"}, desc_client,
     std::next(std::cbegin(modes_client)), std::cend(modes_client),
     std::next(std::cbegin(modes_descs_client)), std::cend(modes_descs_client),
-    {}, {}, mode);
+    {}, {}, {}, mode);
 }
 
 int main(int argc, char *argv[]) {

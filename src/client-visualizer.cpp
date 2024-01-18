@@ -14,6 +14,7 @@
 #include <mutex>
 #include <atomic>
 #include <chrono>
+#include <filesystem>
 
 //#include <iostream>
 
@@ -486,7 +487,16 @@ args::opt_descs_t const opt_descs_visualizer{
       {"type", "Stream type."}}}},
   {"lsl-value", {
     "str", "EEG", "Match the LSL metadata property to this value.", {
-      {"EEG", "With --lsl-property=type, search for EEG streams."}}}}};
+      {"EEG", "With --lsl-property=type, search for EEG streams."}}}},
+  {"font", {"file-path", "default-font-file-paths",
+    "Prepend <file-path> to the list of font locations to be tried.", {}}}};
+
+args::opt_aliases_t const opt_aliases_visualizer{
+  {"font", {
+    {"default-font-file-paths", {
+      {"font", {
+        "/System/Library/Fonts/Helvetica.ttc",
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"}}}}}}};
 
 args::flag_descs_t const flag_descs_time_series{{"help", nullptr}};
 
@@ -504,14 +514,14 @@ int print_usage_visualizer(args::arg_t const &program_name,
     desc_visualizer, std::next(std::cbegin(modes_visualizer)),
     std::cend(modes_visualizer), std::next(std::cbegin(modes_descs_visualizer)),
     std::cend(modes_descs_visualizer), flag_descs_visualizer, 
-    opt_descs_visualizer, mode);
+    opt_descs_visualizer, opt_aliases_visualizer, mode);
 }
 
 int print_usage_time_series(args::arg_t const &program_name,
     args::UsageMessageMode const mode) {
   return args::print_usage(program_name,
     {"client", "visualizer", "time-series"}, desc_time_series, nullptr, nullptr,
-    nullptr, nullptr, flag_descs_time_series, opt_descs_time_series, mode);
+    nullptr, nullptr, flag_descs_time_series, opt_descs_time_series, {}, mode);
 }
 
 int print_usage_short_time_spectrum(args::arg_t const &program_name,
@@ -519,7 +529,7 @@ int print_usage_short_time_spectrum(args::arg_t const &program_name,
   return args::print_usage(program_name,
     {"client", "visualizer", "time-series"}, desc_short_time_spectrum, nullptr,
     nullptr, nullptr, nullptr, flag_descs_short_time_spectrum,
-    opt_descs_short_time_spectrum, mode);
+    opt_descs_short_time_spectrum, {}, mode);
 }
 
 template<std::size_t mode_visualizer>
@@ -552,49 +562,54 @@ int main_client_visualizer(args::args_t::const_iterator &pos,
 
 
   // Parameters
-  std::string const lsl_property{opts_visualizer["lsl-property"].value()};
-  std::string const lsl_value{opts_visualizer["lsl-value"].value()};
-  double const timeout_resolve{args::parse_opt(
-    args::parse_double, opts_visualizer["timeout-resolve"])};
-  double const timeout_open{args::parse_opt(
-    args::parse_double, opts_visualizer["timeout-open"])};
+  std::string const lsl_property{args::parse_last_optval(args::parse_string,
+    opts_visualizer, "lsl-property")};
+  std::string const lsl_value{args::parse_last_optval(args::parse_string,
+    opts_visualizer, "lsl-value")};
+  double const timeout_resolve{args::parse_last_optval(args::parse_double,
+    opts_visualizer, "timeout-resolve")};
+  double const timeout_open{args::parse_last_optval(args::parse_double,
+    opts_visualizer, "timeout-open")};
 
-  double const buffer_duration{args::parse_opt(
-    args::parse_double, opts_visualizer["buffer-duration"])};
+  double const buffer_duration{args::parse_last_optval(args::parse_double, 
+    opts_visualizer, "buffer-duration")};
   bool const use_compute_thread{not flags_visualizer["no-compute-thread"]};
   double const update_rate{60.};
 
-  long const ref_index{args::parse_opt(
-    args::parse_long, opts_visualizer["ref-index"])};
+  long const ref_index{args::parse_last_optval(args::parse_long,
+    opts_visualizer, "ref-index")};
   bool const use_highpass{not flags_visualizer["no-highpass"]};
-  double const highpass_frequency{args::parse_opt(
-    args::parse_double, opts_visualizer["highpass-frequency"])};
-  double const highpass_quality_factor{args::parse_opt(
-    args::parse_double, opts_visualizer["highpass-q"])};
+  double const highpass_frequency{args::parse_last_optval(args::parse_double, 
+    opts_visualizer, "highpass-frequency")};
+  double const highpass_quality_factor{args::parse_last_optval(
+    args::parse_double, opts_visualizer, "highpass-q")};
 
   std::string const window_title{std::string{"Visualizer ("} +
     modes_visualizer[mode_visualizer] + ")"};
   auto const window_style{flags_visualizer["fullscreen"] ?
     sf::Style::Fullscreen : sf::Style::Resize | sf::Style::Close};
   sf::VideoMode const window_video_mode{
-    args::parse_opt(args::parse_unsigned_int, opts_visualizer["window-width"]),
-    args::parse_opt(args::parse_unsigned_int, opts_visualizer["window-height"]),
-    args::parse_opt(args::parse_unsigned_int, opts_visualizer["bits-per-pixel"]),
+    args::parse_last_optval(args::parse_unsigned_int,
+      opts_visualizer, "window-width"),
+    args::parse_last_optval(args::parse_unsigned_int,
+      opts_visualizer, "window-height"),
+    args::parse_last_optval(args::parse_unsigned_int,
+      opts_visualizer, "bits-per-pixel"),
   };
   sf::ContextSettings const window_context_settings{
     0, // depth bits
     0, // stencil bits
-    args::parse_opt(args::parse_unsigned_int,
-      opts_visualizer["antialiasing-level"]),
+    args::parse_last_optval(args::parse_unsigned_int,
+      opts_visualizer, "antialiasing-level"),
     2, // OpenGL version major number
     1, // OpenGL version minor number
   };
-  unsigned int const frame_rate_limit{args::parse_opt(
-    args::parse_unsigned_int, opts_visualizer["frame-rate-limit"])};
+  unsigned int const frame_rate_limit{args::parse_last_optval(
+    args::parse_unsigned_int, opts_visualizer, "frame-rate-limit")};
   bool const vertical_sync{not flags_visualizer["no-vertical-sync"]};
 
-  float const gui_scale{args::parse_opt(
-    args::parse_float, opts_visualizer["gui-scale"])};
+  float const gui_scale{args::parse_last_optval(args::parse_float,
+    opts_visualizer, "gui-scale")};
 
   sf::Vector2f const default_view_scale{1.f, 1.f},
     default_view_offset{0.f, 0.f};
@@ -607,8 +622,12 @@ int main_client_visualizer(args::args_t::const_iterator &pos,
   sf::Color const background_color{0x00, 0x00, 0x00};
 
   auto const font{std::make_shared<sf::Font>()};
-  //font->loadFromFile("/System/Library/Fonts/Helvetica.ttc");
-  font->loadFromFile("/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf");
+  auto const &font_file_paths{opts_visualizer["font"]};
+  for (auto itr{std::crbegin(font_file_paths)};
+      itr < std::crend(font_file_paths); ++itr) {
+    if (std::filesystem::is_regular_file(*itr) and
+        font->loadFromFile(*itr)) break;
+  }
   //font->setSmooth(true);
 
   auto const mouse_button_mod_switch{sf::Mouse::Right};
@@ -742,8 +761,8 @@ int main_client_visualizer(args::args_t::const_iterator &pos,
       y_scale, scrolling, gui_scale * curve_thickness, pa);
   } else if constexpr (mode_visualizer ==
       args::get_mode_index(modes_visualizer, "short-time-spectrum")) {
-    double const fft_duration{args::parse_opt(
-      args::parse_double, opts["fft-duration"])};
+    double const fft_duration{args::parse_last_optval(args::parse_double, opts,
+      "fft-duration")};
     std::size_t const n_in{static_cast<std::size_t>(
       std::round(buffer.sample_rate() * fft_duration))};
     auto const window_function{[](std::size_t const i, std::size_t const n){
@@ -1127,7 +1146,8 @@ int main_client_visualizer(args::args_t::const_iterator &pos,
     args::args_t::const_iterator const &end, args::arg_t const &program_name) {
   auto flags_visualizer{args::init_flags(flag_descs_visualizer)};
   auto opts_visualizer{args::init_opts(opt_descs_visualizer)};
-  args::parse_opts_and_flags(flags_visualizer, opts_visualizer, pos, end);
+  args::parse_opts_and_flags(flags_visualizer, opts_visualizer, pos, end,
+    opt_aliases_visualizer);
 
   std::size_t mode_visualizer{
     args::get_mode_index(modes_visualizer, pos, end, 0)};
