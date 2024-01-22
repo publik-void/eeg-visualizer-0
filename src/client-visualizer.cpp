@@ -496,7 +496,8 @@ args::opt_aliases_t const opt_aliases_visualizer{
     {"default-font-file-paths", {
       {"font", {
         "/System/Library/Fonts/Helvetica.ttc",
-        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"}}}}}}};
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",
+        "/usr/share/fonts/truetype/liberation2/LiberationSans-Regular.ttf"}}}}}}};
 
 args::flag_descs_t const flag_descs_time_series{{"help", nullptr}};
 
