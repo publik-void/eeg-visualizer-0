@@ -3,10 +3,29 @@
 A real-time visualizer for EEG data.
 
 Main use case, currently: Receive EEG data via
-[[https://labstreaminglayer.org][LSL]] and visualize for neurofeedback.
+[[https://labstreaminglayer.org][LSL]] and visualize, e.g. for neurofeedback.
 
-This is a toy project and by no means "complete" or "production-ready" in any
-way.
+This should be considered an unfinished toy project at this stage.
+
+** Screenshots
+
+#+CAPTION: Short-time magnitude spectrum of a white noise testing signal highpassed at 2Hz
+[[./aux/img/screenshot-client-visualizer-short-time-spectrum-0.png]]
+
+#+CAPTION: Time series graphs for an 8-channel white noise testing signal
+[[./aux/img/screenshot-client-visualizer-time-series-0.png]]
+
+** Documentation
+
+The binary incorporates several submodes that can be accessed via a subcommand
+tree. E.g. to run the spectrum analyzer client, use the following command:
+#+begin_src sh
+  eeg-visualizer client visualizer short-time-spectrum
+#+end_src
+
+Each submode comes with its own ~help~ subcommand to print a usage message that
+documents all further submodes, flags and options. Running ~eeg-visualizer help~
+prints the top-level usage message, so you can go from there.
 
 ** Dependencies
 
@@ -19,6 +38,9 @@ Plus [[https://cmake.org][CMake]] and optionally
 
 ** Build instructions
 
+Building on Windows should be possible, but has not been tested as of yet.
+
+For *nix:
 #+begin_src sh
   mkdir -p build; cd build
   cmake ..
@@ -32,6 +54,9 @@ Debug build for development:
   cd ..
   ninja -C build
 #+end_src
+
+A [[file:aux/guix/eeg-visualizer-0.scm][package definition]] for
+[[https://guix.gnu.org][Guix]] is also included.
 
 ** Silencing LSL info messages
 
